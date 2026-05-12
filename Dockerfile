@@ -33,6 +33,10 @@ RUN composer install --optimize-autoloader --no-interaction --no-dev
 RUN mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache \
  && chmod -R 775 storage bootstrap/cache
 
+# Pre-bake the public/storage symlink so the runtime startCommand stays simple
+# (just `php artisan serve`). Idempotent: `|| true` guards against rebuild.
+RUN php artisan storage:link || true
+
 # Expose port 8000
 EXPOSE 8000
 
