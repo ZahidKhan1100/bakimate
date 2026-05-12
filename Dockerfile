@@ -1,57 +1,41 @@
-# syntax=docker/dockerfile:1.6
-#
-# BakiMate Laravel API — production image.
-#
-# Base: `serversideup/php` (Alpine variant) — a hardened, Laravel-aware
-# nginx + php-fpm 8.3 stack. Ships with: pdo_mysql, bcmath, gd, intl, opcache,
-# zip, curl, mbstring, xml, exif, redis. Runs as non-root user `www-data`.
-#
-# Runtime contract (Railway / any Docker host):
-#   - Listens on :8080 (declared via EXPOSE; Railway auto-routes HTTPS edge here).
-#   - On container start, the serversideup entrypoint runs:
-#       * php artisan migrate --force        (AUTORUN_LARAVEL_MIGRATION)
-#       * php artisan storage:link           (AUTORUN_LARAVEL_STORAGE_LINK)
-#       * php artisan optimize               (AUTORUN_LARAVEL_OPTIMIZE)
-#     so config / routes / views are cached against the *runtime* env, not
-#     baked at build time (which would freeze APP_KEY, DB_* etc. to empty).
-#
-# Local build: `docker build -t bakimate-backend .`
-# Local run:   `docker run --rm -p 8080:8080 --env-file .env bakimate-backend`
+FROM php:8.4-cli
+WORKDIR /var/www/html
 
-FROM serversideup/php:8.3-fpm-nginx-alpine AS production
+# Composer warns when running as root during image build — normal for Docker builds.
+ENV COMPOSER_ALLOW_SUPERUSER=1
 
-# --- Runtime configuration (serversideup conventions) -------------------------
-ENV PHP_OPCACHE_ENABLE=1 \
-    SSL_MODE=off \
-    NGINX_HTTP_LISTEN_PORT=8080 \
-    AUTORUN_ENABLED=true \
-    AUTORUN_LARAVEL_STORAGE_LINK=true \
-    AUTORUN_LARAVEL_MIGRATION=true \
-    AUTORUN_LARAVEL_OPTIMIZE=true
+# System deps — libicu-dev required to compile ext-intl, libpng/libjpeg/libfreetype
+# for ext-gd (DomPDF / image handling), libonig-dev for ext-mbstring.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git unzip zip curl \
+    libonig-dev libxml2-dev libzip-dev libicu-dev \
+    libpng-dev libjpeg-dev libfreetype-dev \
+ && rm -rf /var/lib/apt/lists/*
 
-# --- Copy application source --------------------------------------------------
-# `.dockerignore` excludes vendor/, node_modules/, .env, storage caches, etc.
-COPY --chown=www-data:www-data . /var/www/html
+# Compile intl explicitly first so ICU is linked cleanly, then remaining extensions.
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+ && docker-php-ext-install -j "$(nproc)" intl \
+ && docker-php-ext-install -j "$(nproc)" pdo pdo_mysql mbstring xml zip bcmath gd \
+ && pecl install redis \
+ && docker-php-ext-enable redis \
+ && php -r "extension_loaded('intl') || exit(1);"
 
-# --- Composer install (production only, optimised autoloader) -----------------
-# Composer is pre-installed in the base image. Switch to www-data so cache
-# files end up writable by the runtime user.
-USER www-data
+# Install Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-RUN composer install \
-        --no-dev \
-        --optimize-autoloader \
-        --no-interaction \
-        --prefer-dist \
-        --no-progress \
-        --no-scripts \
- && composer dump-autoload --optimize --classmap-authoritative
+# Copy all files
+COPY . .
 
-# --- Expose port + healthcheck -----------------------------------------------
-EXPOSE 8080
+# Install PHP dependencies (production only)
+RUN composer install --optimize-autoloader --no-interaction --no-dev
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:8080/up >/dev/null 2>&1 || exit 1
+# Set permissions for Laravel
+RUN mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache \
+ && chmod -R 775 storage bootstrap/cache
 
-# Default CMD is provided by the serversideup base image (php-fpm + nginx
-# under s6-overlay), which also invokes the AUTORUN_* artisan commands above.
+# Expose port 8000
+EXPOSE 8000
+
+# Start Laravel server (railway.json `startCommand` overrides this in production,
+# but we keep a sensible default so `docker run` Just Works locally).
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
