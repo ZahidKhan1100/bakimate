@@ -1,0 +1,70 @@
+# Keep the Docker build context lean: no local secrets, no host vendor/, no
+# editor / CI noise. Anything listed here is invisible to `COPY . .` in the
+# Dockerfile.
+
+# --- Secrets & local-only env -------------------------------------------------
+.env
+.env.backup
+.env.production
+.env.*.local
+
+# --- Git / GitHub -------------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+.github
+
+# --- PHP build artefacts (regenerated inside the image) -----------------------
+vendor
+composer.phar
+auth.json
+.phpunit.cache
+.phpunit.result.cache
+
+# --- Node / front-end build artefacts (Vite, not used in API-only deploys) ----
+node_modules
+public/build
+public/hot
+public/storage
+
+# --- Laravel runtime caches (created at boot by AUTORUN_LARAVEL_OPTIMIZE) -----
+bootstrap/cache/*.php
+storage/app/public/*
+!storage/app/public/.gitignore
+storage/framework/cache/data/*
+!storage/framework/cache/data/.gitignore
+storage/framework/sessions/*
+!storage/framework/sessions/.gitignore
+storage/framework/views/*
+!storage/framework/views/.gitignore
+storage/framework/testing/*
+!storage/framework/testing/.gitignore
+storage/logs/*
+!storage/logs/.gitignore
+storage/pail
+
+# --- Tests ---------------------------------------------------------------------
+tests
+phpunit.xml
+
+# --- Editors / IDE -------------------------------------------------------------
+.editorconfig
+.idea
+.vscode
+.cursor
+.codex
+.nova
+.zed
+.phpactor.json
+
+# --- Misc OS / docs -----------------------------------------------------------
+.DS_Store
+Thumbs.db
+README.md
+
+# --- Deploy metadata (Docker image doesn't need these) ------------------------
+Dockerfile
+.dockerignore
+nixpacks.toml
+Procfile
+railway.json
