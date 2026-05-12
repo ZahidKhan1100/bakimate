@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Monthly statement — {{ $monthLabel }}</title>
+    <style>
+        body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #0f172a; }
+        h1 { font-size: 18px; margin: 0 0 6px; }
+        h2 { font-size: 13px; margin: 16px 0 8px; color: #334155; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+        th { background: #f1f5f9; font-size: 10px; text-transform: uppercase; }
+        .muted { color: #64748b; font-size: 10px; }
+        .num { text-align: right; }
+        .credit { color: #b91c1c; }
+        .payment { color: #15803d; }
+        .summary { margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <h1>BakiMate — Monthly statement</h1>
+    <p class="muted">Shop: {{ $shopName }} · Period: {{ $monthLabel }} · Generated {{ $generatedAt }}</p>
+
+    <div class="summary">
+        <strong>Collected (payments):</strong> RM {{ number_format($paymentsTotalSen / 100, 2) }} ·
+        <strong>New credit extended:</strong> RM {{ number_format($creditsTotalSen / 100, 2) }}
+    </div>
+
+    @if(count($creditByItem) > 0)
+        <h2>Credit by quick item (this month)</h2>
+        <table>
+            <thead>
+            <tr><th>Item</th><th class="num">Credit (RM)</th></tr>
+            </thead>
+            <tbody>
+            @foreach($creditByItem as $label => $sen)
+                <tr>
+                    <td>{{ $label }}</td>
+                    <td class="num">{{ number_format($sen / 100, 2) }}</td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    @endif
+
+    <h2>All movements</h2>
+    <table>
+        <thead>
+        <tr>
+            <th>Date</th>
+            <th>Customer</th>
+            <th>Type</th>
+            <th class="num">Amount (RM)</th>
+            <th>Item</th>
+            <th>Note</th>
+        </tr>
+        </thead>
+        <tbody>
+        @forelse($rows as $r)
+            <tr>
+                <td>{{ \Illuminate\Support\Carbon::parse($r->created_at)->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
+                <td>{{ $customerNames[$r->customer_id] ?? ('#'.$r->customer_id) }}</td>
+                <td class="{{ $r->type === 'credit' ? 'credit' : 'payment' }}">{{ strtoupper($r->type) }}</td>
+                <td class="num">{{ number_format($r->amount_sen / 100, 2) }}</td>
+                <td>{{ $r->item_key ?: '—' }}</td>
+                <td>{{ $r->note ?? '—' }}</td>
+            </tr>
+        @empty
+            <tr><td colspan="6">No transactions in this month.</td></tr>
+        @endforelse
+        </tbody>
+    </table>
+</body>
+</html>
