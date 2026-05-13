@@ -20,14 +20,14 @@
     <h1>BakiMate — Customer ledger</h1>
     <p class="muted">Shop: {{ $shopName }} · Generated {{ $generatedAt }}</p>
     <h2>{{ $customer->name }}</h2>
-    <p>Phone: {{ $customer->phone ?? '—' }} · Current balance: RM {{ number_format($customer->balance_sen / 100, 2) }}</p>
+    <p>Phone: {{ $customer->phone ?? '—' }} · Current balance: {{ $currencyCode }} {{ number_format(((int) $customer->balance_sen) / 100, 2) }}</p>
 
     <table>
         <thead>
         <tr>
             <th>Date</th>
             <th>Type</th>
-            <th class="num">Amount (RM)</th>
+            <th class="num">Amount ({{ $currencyCode }})</th>
             <th>Note</th>
         </tr>
         </thead>
@@ -35,9 +35,9 @@
         @forelse($rows as $r)
             <tr>
                 <td>{{ \Illuminate\Support\Carbon::parse($r->created_at)->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
-                <td class="{{ $r->type === 'credit' ? 'credit' : 'payment' }}">{{ strtoupper($r->type) }}</td>
-                <td class="num">{{ number_format($r->amount_sen / 100, 2) }}</td>
-                <td>{{ $r->note ?? '—' }}</td>
+                <td class="{{ $r->type === 'credit' ? 'credit' : 'payment' }}">{{ strtoupper((string) $r->type) }}</td>
+                <td class="num">{{ number_format(((int) $r->amount_sen) / 100, 2) }}</td>
+                <td>{{ $r->note ? \Illuminate\Support\Str::limit($r->note, 500) : '—' }}</td>
             </tr>
         @empty
             <tr><td colspan="4">No transactions recorded.</td></tr>

@@ -10,6 +10,7 @@ use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
 use App\Models\Customer;
 use App\Models\CustomerPromise;
+use App\Models\Transaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -36,6 +37,23 @@ class CustomerController extends Controller
             ->whereKey($customerId)
             ->firstOrFail();
 
+        $recentTransactions = Transaction::query()
+            ->where('shop_id', $shop->id)
+            ->where('customer_id', $customer->id)
+            ->orderByDesc('created_at')
+            ->limit(100)
+            ->get()
+            ->map(fn (Transaction $t) => [
+                'id' => $t->id,
+                'amount_sen' => (int) $t->amount_sen,
+                'type' => $t->type,
+                'note' => $t->note,
+                'item_key' => $t->item_key,
+                'created_at' => $t->created_at !== null ? $t->created_at->toIso8601String() : null,
+            ])
+            ->values()
+            ->all();
+
         return response()->json(array_merge($customer->toArray(), [
             'promises' => $customer->promises()
                 ->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")
@@ -45,6 +63,7 @@ class CustomerController extends Controller
                 ->map(fn (CustomerPromise $p) => CustomerPromiseController::serialize($p))
                 ->values()
                 ->all(),
+            'recent_transactions' => $recentTransactions,
         ]));
     }
 

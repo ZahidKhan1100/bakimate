@@ -22,21 +22,21 @@
     <p class="muted">Shop: {{ $shopName }} · Period: {{ $monthLabel }} · Generated {{ $generatedAt }}</p>
 
     <div class="summary">
-        <strong>Collected (payments):</strong> RM {{ number_format($paymentsTotalSen / 100, 2) }} ·
-        <strong>New credit extended:</strong> RM {{ number_format($creditsTotalSen / 100, 2) }}
+        <strong>Collected (payments):</strong> {{ $currencyCode }} {{ number_format($paymentsTotalSen / 100, 2) }} ·
+        <strong>New credit extended:</strong> {{ $currencyCode }} {{ number_format($creditsTotalSen / 100, 2) }}
     </div>
 
     @if(count($creditByItem) > 0)
         <h2>Credit by quick item (this month)</h2>
         <table>
             <thead>
-            <tr><th>Item</th><th class="num">Credit (RM)</th></tr>
+            <tr><th>Item</th><th class="num">Credit ({{ $currencyCode }})</th></tr>
             </thead>
             <tbody>
             @foreach($creditByItem as $label => $sen)
                 <tr>
-                    <td>{{ $label }}</td>
-                    <td class="num">{{ number_format($sen / 100, 2) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($label, 120) }}</td>
+                    <td class="num">{{ number_format(((int) $sen) / 100, 2) }}</td>
                 </tr>
             @endforeach
             </tbody>
@@ -50,7 +50,7 @@
             <th>Date</th>
             <th>Customer</th>
             <th>Type</th>
-            <th class="num">Amount (RM)</th>
+            <th class="num">Amount ({{ $currencyCode }})</th>
             <th>Item</th>
             <th>Note</th>
         </tr>
@@ -59,11 +59,11 @@
         @forelse($rows as $r)
             <tr>
                 <td>{{ \Illuminate\Support\Carbon::parse($r->created_at)->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
-                <td>{{ $customerNames[$r->customer_id] ?? ('#'.$r->customer_id) }}</td>
-                <td class="{{ $r->type === 'credit' ? 'credit' : 'payment' }}">{{ strtoupper($r->type) }}</td>
-                <td class="num">{{ number_format($r->amount_sen / 100, 2) }}</td>
-                <td>{{ $r->item_key ?: '—' }}</td>
-                <td>{{ $r->note ?? '—' }}</td>
+                <td>{{ $customerNames[(int) $r->customer_id] ?? ('#'.$r->customer_id) }}</td>
+                <td class="{{ $r->type === 'credit' ? 'credit' : 'payment' }}">{{ strtoupper((string) $r->type) }}</td>
+                <td class="num">{{ number_format(((int) $r->amount_sen) / 100, 2) }}</td>
+                <td>{{ $r->item_key ? \Illuminate\Support\Str::limit((string) $r->item_key, 80) : '—' }}</td>
+                <td>{{ $r->note ? \Illuminate\Support\Str::limit((string) $r->note, 400) : '—' }}</td>
             </tr>
         @empty
             <tr><td colspan="6">No transactions in this month.</td></tr>

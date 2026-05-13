@@ -20,7 +20,7 @@
         <p class="lead">
             This certifies that the account for <strong>{{ $customer->name }}</strong> with
             <strong>{{ $shopName }}</strong>@if(!empty($shopLocation))<br><span class="muted">{{ $shopLocation }}</span>@endif
-            has an <span class="accent">outstanding balance of RM 0.00</span> as of this date.
+            has an <span class="accent">outstanding balance of {{ $currencyCode }} 0.00</span> as of this date.
         </p>
         <p class="lead">Thank you for your trust.</p>
         <p class="sig">Generated {{ $generatedAt }} · {{ config('app.timezone') }}</p>

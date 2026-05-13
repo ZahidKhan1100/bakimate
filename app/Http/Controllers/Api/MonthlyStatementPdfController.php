@@ -8,6 +8,7 @@ use App\Models\Transaction;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class MonthlyStatementPdfController extends Controller
@@ -16,8 +17,13 @@ class MonthlyStatementPdfController extends Controller
     {
         $shop = $request->user()?->shops()->firstOrFail();
 
+        $currency = strtoupper((string) ($shop->primary_currency_code ?? 'MYR'));
+        if ($currency === '') {
+            $currency = 'MYR';
+        }
+
         $month = (string) $request->query('month', '');
-        $tz = config('app.timezone');
+        $tz = (string) config('app.timezone', 'UTC');
         $now = CarbonImmutable::now()->timezone($tz);
 
         if ($month === '') {
@@ -37,10 +43,14 @@ class MonthlyStatementPdfController extends Controller
             ->orderBy('created_at')
             ->get(['created_at', 'type', 'amount_sen', 'note', 'item_key', 'customer_id']);
 
-        $customerNames = Customer::query()
-            ->where('shop_id', $shop->id)
-            ->whereIn('id', $rows->pluck('customer_id')->unique()->filter())
-            ->pluck('name', 'id');
+        $ids = $rows->pluck('customer_id')->unique()->filter()->map(fn ($id) => (int) $id)->values()->all();
+
+        $customerNames = [];
+        if ($ids !== []) {
+            foreach (Customer::query()->where('shop_id', $shop->id)->whereIn('id', $ids)->get(['id', 'name']) as $c) {
+                $customerNames[(int) $c->id] = $c->name;
+            }
+        }
 
         $creditByItem = [];
         foreach ($rows as $t) {
@@ -54,21 +64,31 @@ class MonthlyStatementPdfController extends Controller
         $payments = (int) $rows->where('type', Transaction::TYPE_PAYMENT)->sum('amount_sen');
         $credits = (int) $rows->where('type', Transaction::TYPE_CREDIT)->sum('amount_sen');
 
-        $pdf = Pdf::loadView('pdf.monthly-statement', [
-            'shopName' => $shop->name,
-            'monthLabel' => $start->format('F Y'),
-            'customerNames' => $customerNames,
-            'paymentsTotalSen' => $payments,
-            'creditsTotalSen' => $credits,
-            'creditByItem' => $creditByItem,
-            'generatedAt' => $now->format('Y-m-d H:i'),
-        ])->setPaper('a4', 'portrait');
+        try {
+            @ini_set('memory_limit', '256M');
 
-        $filename = 'bakimate-statement-'.$start->format('Y-m').'.pdf';
+            $pdf = Pdf::loadView('pdf.monthly-statement', [
+                'shopName' => $shop->name,
+                'currencyCode' => $currency,
+                'monthLabel' => $start->format('F Y'),
+                'customerNames' => $customerNames,
+                'paymentsTotalSen' => $payments,
+                'creditsTotalSen' => $credits,
+                'creditByItem' => $creditByItem,
+                'rows' => $rows,
+                'generatedAt' => $now->format('Y-m-d H:i'),
+            ])->setPaper('a4', 'portrait');
 
-        return response($pdf->output(), 200, [
-            'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-        ]);
+            $filename = 'bakimate-statement-'.$start->format('Y-m').'.pdf';
+
+            return response($pdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Monthly PDF generation failed', ['message' => $e->getMessage()]);
+
+            abort(500, 'Unable to generate PDF. Please try again.');
+        }
     }
 }
