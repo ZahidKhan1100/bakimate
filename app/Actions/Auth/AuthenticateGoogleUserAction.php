@@ -24,6 +24,7 @@ class AuthenticateGoogleUserAction
                 $user->fill([
                     'name' => $claims['name'],
                     'email' => $claims['email'],
+                    'email_verified_at' => $user->email_verified_at ?? now(),
                 ]);
                 $user->save();
 
@@ -35,6 +36,7 @@ class AuthenticateGoogleUserAction
                 'email' => $claims['email'],
                 'google_sub' => $claims['sub'],
                 'password' => null,
+                'email_verified_at' => now(),
             ]);
 
             Shop::query()->create([

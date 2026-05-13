@@ -14,6 +14,17 @@ return [
     |
     */
 
+    /**
+     * Same Mailgun setup as Habimate — use the existing domain + API key until BakiMate has its own.
+     * Requires: composer symfony/mailgun-mailer (already in composer.json).
+     */
+    'mailgun' => [
+        'domain' => env('MAILGUN_DOMAIN'),
+        'secret' => env('MAILGUN_SECRET'),
+        'endpoint' => env('MAILGUN_ENDPOINT', 'api.mailgun.net'),
+        'scheme' => 'https',
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

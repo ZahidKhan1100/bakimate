@@ -24,6 +24,7 @@ class BakimateLedgerSeeder extends Seeder
                     'name' => 'Demo Shopkeeper',
                     'password' => null,
                     'google_sub' => 'seed-demo-sub-001',
+                    'email_verified_at' => now(),
                 ],
             );
 

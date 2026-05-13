@@ -21,7 +21,14 @@ Route::post('/auth/google', [AuthController::class, 'google']);
 Route::post('/auth/apple', [AuthController::class, 'apple']);
 Route::post('/auth/demo', [AuthController::class, 'demo']);
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:6,1');
+Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:12,1');
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:4,1');
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:8,1');
+Route::post('/auth/check-email-verified', [AuthController::class, 'checkEmailVerified'])->middleware('throttle:30,1');
+Route::post('/auth/resend-verification', [AuthController::class, 'resendVerification'])->middleware('throttle:3,1');
+
+Route::middleware(['auth:sanctum', 'verified'])->group(function () {
     Route::get('/shop', [ShopProfileController::class, 'show']);
     Route::patch('/shop', [ShopProfileController::class, 'update']);
     Route::post('/shop/duitnow-qr', [ShopDuitNowQrController::class, 'store']);

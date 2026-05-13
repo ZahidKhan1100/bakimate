@@ -13,4 +13,13 @@ return [
     'demo_login_enabled' => $demoExplicit !== null && $demoExplicit !== ''
         ? filter_var($demoExplicit, FILTER_VALIDATE_BOOLEAN)
         : env('APP_ENV', 'production') === 'local',
+
+    /**
+     * Deep link used in password reset emails (must match Expo `scheme` + route).
+     * Example: bakimate://reset-password?token=...&email=...
+     */
+    'password_reset_app_scheme' => env('PASSWORD_RESET_APP_SCHEME', 'bakimate'),
+
+    /** After the user taps the link in the verification email (served by the API web route). */
+    'email_verified_redirect_url' => env('EMAIL_VERIFIED_REDIRECT_URL', 'bakimate://verify-email?verified=1'),
 ];

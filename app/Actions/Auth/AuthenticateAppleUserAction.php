@@ -28,6 +28,9 @@ class AuthenticateAppleUserAction
                 if ($fullName !== null && trim($fullName) !== '' && trim($fullName) !== $user->name) {
                     $user->name = trim($fullName);
                 }
+                if ($user->email_verified_at === null) {
+                    $user->email_verified_at = now();
+                }
                 $user->save();
 
                 return $user;
@@ -49,6 +52,7 @@ class AuthenticateAppleUserAction
                     'email' => $email,
                     'apple_sub' => $claims['sub'],
                     'password' => null,
+                    'email_verified_at' => now(),
                 ]);
             } catch (QueryException) {
                 throw new \RuntimeException(
