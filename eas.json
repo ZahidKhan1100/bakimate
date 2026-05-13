@@ -1,0 +1,55 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://bakimate.habimate.com/api",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "1063670134158-ol4f2247tshoccsa07ubssj1ere5umtk.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "1063670134158-i6408tmq4ugjl0nlu304a0pjf0ri55cl.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://bakimate.habimate.com/api",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "1063670134158-ol4f2247tshoccsa07ubssj1ere5umtk.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "1063670134158-i6408tmq4ugjl0nlu304a0pjf0ri55cl.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "ios": {},
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://bakimate.habimate.com/api",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "1063670134158-ol4f2247tshoccsa07ubssj1ere5umtk.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "1063670134158-i6408tmq4ugjl0nlu304a0pjf0ri55cl.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

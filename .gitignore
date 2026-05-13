@@ -31,6 +31,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -41,3 +42,10 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Build artefacts that should never live in the repo (e.g. downloaded EAS
+# builds left over in assets/). Keep this list explicit so a stray drag-and-drop
+# of an APK/AAB/IPA can't balloon the EAS build upload.
+*.apk
+*.aab
+*.ipa

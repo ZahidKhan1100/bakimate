@@ -1,21 +1,30 @@
-import { useEffect, useState } from 'react';
-import { useColorScheme as useRNColorScheme } from 'react-native';
+import { useUiPreferencesStore } from "@/stores/ui-preferences-store";
+import { useEffect, useState } from "react";
+import { useColorScheme as useRNColorScheme } from "react-native";
 
 /**
- * To support static rendering, this value needs to be re-calculated on the client side for web
+ * Web: after client hydration, resolves the same way as native (system vs Profile override).
  */
-export function useColorScheme() {
-  const [hasHydrated, setHasHydrated] = useState(false);
+export function useColorScheme(): "light" | "dark" {
+  const [hydrated, setHydrated] = useState(false);
+  const preference = useUiPreferencesStore((s) => s.colorSchemePreference);
+  const systemRn = useRNColorScheme();
 
   useEffect(() => {
-    setHasHydrated(true);
+    setHydrated(true);
   }, []);
 
-  const colorScheme = useRNColorScheme();
+  const system = hydrated ? (systemRn === "dark" ? "dark" : "light") : "light";
 
-  if (hasHydrated) {
-    return colorScheme;
+  if (!hydrated) {
+    return "light";
+  }
+  if (preference === "light") {
+    return "light";
+  }
+  if (preference === "dark") {
+    return "dark";
   }
 
-  return 'light';
+  return system;
 }

@@ -1,48 +1,44 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+import { BakimateColors } from "./bakimate-theme";
+import { Platform } from "react-native";
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: BakimateColors.secondary,
+    background: BakimateColors.backgroundLight,
+    tint: BakimateColors.accentTeal,
+    icon: BakimateColors.neutralText,
+    tabIconDefault: "#94A3B8",
+    tabIconSelected: BakimateColors.accentTeal,
+    /** Glass layers sit on mesh; keep mostly transparent for chrome that expects a card token */
+    card: "rgba(255, 255, 255, 0.01)",
+    danger: BakimateColors.danger,
+    success: BakimateColors.success,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    text: "#F1F5F9",
+    background: BakimateColors.backgroundDark,
+    tint: BakimateColors.accentTeal,
+    icon: BakimateColors.neutralTextMutedDark,
+    tabIconDefault: "#64748B",
+    tabIconSelected: BakimateColors.accentTeal,
+    card: "rgba(15, 23, 42, 0.01)",
+    danger: "#F87171",
+    success: BakimateColors.success,
   },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+    sans: "system-ui",
+    serif: "ui-serif",
+    rounded: "ui-rounded",
+    mono: "ui-monospace",
   },
   default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
+    sans: "normal",
+    serif: "serif",
+    rounded: "normal",
+    mono: "monospace",
   },
   web: {
     sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
