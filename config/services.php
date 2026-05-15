@@ -21,7 +21,8 @@ return [
     'mailgun' => [
         'domain' => env('MAILGUN_DOMAIN'),
         'secret' => env('MAILGUN_SECRET'),
-        'endpoint' => env('MAILGUN_ENDPOINT', 'api.mailgun.net'),
+        // Hostname only (e.g. api.mailgun.net). Strip accidental https:// from .env.
+        'endpoint' => ($h = preg_replace('#^https?://#i', '', trim((string) env('MAILGUN_ENDPOINT', 'api.mailgun.net')))) === '' ? 'api.mailgun.net' : $h,
         'scheme' => 'https',
     ],
 
