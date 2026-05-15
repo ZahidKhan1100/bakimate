@@ -1,7 +1,7 @@
 FROM php:8.4-cli
 WORKDIR /var/www/html
 
-# Composer warns when running as root during image build — normal for Docker builds.
+# Composer warns when running as root during Docker builds — normal for Docker builds.
 ENV COMPOSER_ALLOW_SUPERUSER=1
 
 # System deps — libicu-dev required to compile ext-intl, libpng/libjpeg/libfreetype
@@ -26,13 +26,15 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 # Copy all files
 COPY . .
 
-# Valid APP_KEY for `composer install` / post-autoload Artisan scripts.
-# Runtime APP_KEY from Railway overrides .env when the container runs.
+# Install deps first (vendor/autoload); skip scripts until APP_KEY exists.
+RUN composer install --optimize-autoloader --no-interaction --no-dev --no-scripts
+
+# App key for Artisan during image build. Railway APP_KEY overrides at runtime.
 RUN if [ ! -f .env ]; then cp .env.example .env; fi \
     && php artisan key:generate --force --no-interaction
 
-# Install PHP dependencies (production only)
-RUN composer install --optimize-autoloader --no-interaction --no-dev
+# Composer post-autoload-dump (package:discover, filament:upgrade, etc.)
+RUN composer dump-autoload -o --no-interaction --no-dev
 
 # Set permissions for Laravel
 RUN mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache \
