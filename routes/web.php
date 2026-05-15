@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Web\PublicCustomerBalanceController;
+use App\Models\User;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -10,8 +12,27 @@ Route::get('/', function () {
 Route::get('/v/{token}', PublicCustomerBalanceController::class)
     ->where('token', '[A-Za-z0-9]{40,128}');
 
-Route::get('/email/verify/{id}/{hash}', function (\Illuminate\Foundation\Auth\EmailVerificationRequest $request) {
-    $request->fulfill();
+/**
+ * Mobile/API users have no web session; Laravel's EmailVerificationRequest calls $this->user() and 500s when null.
+ * Signed URL + explicit user lookup matches the link we send from SendVerificationEmailMailgunAction.
+ */
+Route::get('/email/verify/{id}/{hash}', function (int $id, string $hash) {
+    $user = User::query()->find($id);
 
-    return redirect()->away(config('bakimate.email_verified_redirect_url'));
+    if ($user === null) {
+        abort(404);
+    }
+
+    if (! hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+        abort(403);
+    }
+
+    if (! $user->hasVerifiedEmail()) {
+        $user->markEmailAsVerified();
+        event(new Verified($user));
+    }
+
+    $target = config('bakimate.email_verified_redirect_url') ?? 'bakimate://verify-email?verified=1';
+
+    return redirect()->away($target);
 })->middleware(['signed', 'throttle:6,1'])->name('verification.verify');
