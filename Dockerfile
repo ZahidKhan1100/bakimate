@@ -30,8 +30,7 @@ RUN composer install --optimize-autoloader --no-interaction
 RUN mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache \
  && chmod -R 775 storage bootstrap/cache
 
-# Expose port 8000
+# Listen on $PORT when set (Railway, Docker), otherwise 8000 for local Docker runs.
 EXPOSE 8000
-
-# Start Laravel server
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+ENV PORT=8000
+CMD sh -c "exec php artisan serve --host=0.0.0.0 --port=${PORT}"
