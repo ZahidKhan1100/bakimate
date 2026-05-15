@@ -47,6 +47,6 @@ RUN php artisan storage:link || true
 # Expose port 8000
 EXPOSE 8000
 
-# Start Laravel server (railway.json `startCommand` overrides this in production,
-# but we keep a sensible default so `docker run` Just Works locally).
-CMD ["sh", "-c", "php artisan serve --host=0.0.0.0 --port=${PORT:-8000}"]
+# Built-in server with Laravel front controller (more predictable in Docker than `artisan serve`).
+# `railway.json` startCommand overrides this on Railway.
+CMD ["sh", "-c", "exec php -S 0.0.0.0:${PORT:-8000} -t public public/index.php"]
