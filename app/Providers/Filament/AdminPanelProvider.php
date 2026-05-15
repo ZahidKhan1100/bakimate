@@ -33,6 +33,7 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
+            ->login()
             ->authGuard('admin')
             ->brandName('BakiMate')
             ->profile(isSimple: false)

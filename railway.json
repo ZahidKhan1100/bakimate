@@ -7,12 +7,12 @@
   "deploy": {
     "runtime": "V2",
     "numReplicas": 1,
-    "startCommand": "sh -c \"exec php artisan serve --host='[::]' --port=8000\"",
+    "startCommand": "sh -c \"exec php artisan serve --host='[::]' --port=${PORT:-8000}\"",
     "preDeployCommand": [
       "php artisan migrate --force"
     ],
     "healthcheckPath": "/up",
-    "healthcheckTimeout": 120,
+    "healthcheckTimeout": 300,
     "sleepApplication": false,
     "useLegacyStacker": false,
     "ipv6EgressEnabled": true,
