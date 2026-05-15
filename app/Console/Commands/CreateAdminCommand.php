@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Models\Admin;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
+use Spatie\Permission\Models\Role;
 
 class CreateAdminCommand extends Command
 {
@@ -14,6 +15,8 @@ class CreateAdminCommand extends Command
                             {--email= : Staff email}
                             {--name= : Display name}
                             {--password= : Password (omit for prompt)}
+                            {--role=super-admin : Spatie role name (guard: admin)}
+                            {--no-role : Do not assign a role}
                             {--force : Overwrite password when admin exists}';
 
     protected $description = 'Create a Filament staff admin (admins table, /admin login)';
@@ -55,6 +58,24 @@ class CreateAdminCommand extends Command
         $admin->name = trim($name);
         $admin->password = $password;
         $admin->save();
+
+        if (! $this->option('no-role')) {
+            $roleName = trim((string) $this->option('role'));
+            $role = Role::query()
+                ->where('name', $roleName)
+                ->where('guard_name', 'admin')
+                ->first();
+
+            if ($role) {
+                $admin->syncRoles([$roleName]);
+                $this->line(sprintf('Role assigned: %s', $roleName));
+            } else {
+                $this->warn(sprintf(
+                    'Role "%s" (guard admin) not found. After migrations, run: php artisan shield:setup -n && php artisan shield:generate --all --panel=admin -n',
+                    $roleName,
+                ));
+            }
+        }
 
         $this->components->success(sprintf('Staff admin saved: %s', $admin->email));
         $url = rtrim((string) config('app.url'), '/').'/admin';

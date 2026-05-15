@@ -8,11 +8,13 @@
     "require": {
         "php": "^8.3",
         "barryvdh/laravel-dompdf": "^3.1",
+        "bezhansalleh/filament-shield": "^4.2",
         "filament/filament": "^4.0",
         "firebase/php-jwt": "^7.0",
         "laravel/framework": "^13.7",
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^3.0",
+        "spatie/laravel-permission": "^7.4",
         "symfony/mailgun-mailer": "^7.4"
     },
     "require-dev": {
