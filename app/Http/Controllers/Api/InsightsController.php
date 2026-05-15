@@ -14,7 +14,12 @@ class InsightsController extends Controller
 {
     public function __invoke(Request $request): JsonResponse
     {
-        $shop = $request->user()?->shops()->firstOrFail();
+        $shop = $request->user()?->shops()->first();
+        if ($shop === null) {
+            return response()->json([
+                'message' => 'No shop is set up for this account yet. Sign out and sign in again, or contact support.',
+            ], 422);
+        }
         $tzName = $this->resolveInsightsTimezone($request);
         $now = CarbonImmutable::now($tzName);
         $weekStart = $now->startOfWeek()->startOfDay();
