@@ -26,6 +26,11 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 # Copy all files
 COPY . .
 
+# Valid APP_KEY for `composer install` / post-autoload Artisan scripts.
+# Runtime APP_KEY from Railway overrides .env when the container runs.
+RUN if [ ! -f .env ]; then cp .env.example .env; fi \
+    && php artisan key:generate --force --no-interaction
+
 # Install PHP dependencies (production only)
 RUN composer install --optimize-autoloader --no-interaction --no-dev
 
@@ -42,4 +47,4 @@ EXPOSE 8000
 
 # Start Laravel server (railway.json `startCommand` overrides this in production,
 # but we keep a sensible default so `docker run` Just Works locally).
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+CMD ["sh", "-c", "php artisan serve --host=0.0.0.0 --port=${PORT:-8000}"]
