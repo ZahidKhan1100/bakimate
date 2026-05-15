@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Actions\Auth\AuthenticateAppleUserAction;
 use App\Actions\Auth\AuthenticateGoogleUserAction;
 use App\Actions\Auth\RegisterEmailUserAction;
+use App\Actions\Auth\SendVerificationEmailMailgunAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AppleLoginRequest;
 use App\Http\Requests\EmailLoginRequest;
@@ -19,6 +20,10 @@ use Illuminate\Support\Facades\Password;
 
 class AuthController extends Controller
 {
+    public function __construct(
+        private readonly SendVerificationEmailMailgunAction $sendVerificationEmailMailgun,
+    ) {}
+
     public function google(GoogleLoginRequest $request, AuthenticateGoogleUserAction $action): JsonResponse
     {
         try {
@@ -50,7 +55,7 @@ class AuthController extends Controller
     public function register(EmailRegisterRequest $request, RegisterEmailUserAction $action): JsonResponse
     {
         $user = $action->execute($request->validated());
-        $user->sendEmailVerificationNotification();
+        $this->sendVerificationEmailMailgun->execute($user);
 
         return $this->registrationPendingResponse($user);
     }
@@ -104,7 +109,7 @@ class AuthController extends Controller
         $user = User::query()->where('email', $request->validated('email'))->first();
 
         if ($user !== null && ! $user->hasVerifiedEmail()) {
-            $user->sendEmailVerificationNotification();
+            $this->sendVerificationEmailMailgun->execute($user);
         }
 
         return response()->json([
