@@ -1,0 +1,100 @@
+diff --git a/node_modules/expo-modules-core/expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/ProjectConfiguration.kt b/node_modules/expo-modules-core/expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/ProjectConfiguration.kt
+index 782ec39..86273fc 100644
+--- a/node_modules/expo-modules-core/expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/ProjectConfiguration.kt
++++ b/node_modules/expo-modules-core/expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/ProjectConfiguration.kt
+@@ -78,25 +78,34 @@ internal fun Project.applyPublishing(expoModulesExtension: ExpoModuleExtension)
+     .applyPublishingVariant()
+ 
+   afterEvaluate {
+-    val publicationInfo = PublicationInfo(this)
+-
+-    publishingExtension()
+-      .publications
+-      .createReleasePublication(
++    val owningProject = this@applyPublishing
++    gradle.projectsEvaluated {
++      val publicationInfo = PublicationInfo(owningProject)
++
++      owningProject
++        .publishingExtension()
++        .publications
++        .createReleasePublication(
++          publicationInfo,
++          expoModulesExtension.pomConfigurator
++        )
++
++      owningProject.createExpoPublishToMavenLocalTask(publicationInfo, expoModulesExtension)
++
++      val npmLocalRepositoryRelativePath = "local-maven-repo"
++      val npmLocalRepository =
++        File("${owningProject.projectDir.parentFile}/${npmLocalRepositoryRelativePath}").toURI()
++      owningProject.publishingExtension().repositories.mavenLocal { mavenRepo ->
++        mavenRepo.name = "NPMPackage"
++        mavenRepo.url = npmLocalRepository
++      }
++
++      owningProject.createExpoPublishTask(
+         publicationInfo,
+-        expoModulesExtension.pomConfigurator
++        expoModulesExtension,
++        npmLocalRepositoryRelativePath
+       )
+-
+-    createExpoPublishToMavenLocalTask(publicationInfo, expoModulesExtension)
+-
+-    val npmLocalRepositoryRelativePath = "local-maven-repo"
+-    val npmLocalRepository = File("${project.projectDir.parentFile}/${npmLocalRepositoryRelativePath}").toURI()
+-    publishingExtension().repositories.mavenLocal { mavenRepo ->
+-      mavenRepo.name = "NPMPackage"
+-      mavenRepo.url = npmLocalRepository
+     }
+-
+-    createExpoPublishTask(publicationInfo, expoModulesExtension, npmLocalRepositoryRelativePath)
+   }
+ }
+ 
+diff --git a/node_modules/expo-modules-core/expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/android/MavenPublicationExtension.kt b/node_modules/expo-modules-core/expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/android/MavenPublicationExtension.kt
+index 127e7d6..a8e7933 100644
+--- a/node_modules/expo-modules-core/expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/android/MavenPublicationExtension.kt
++++ b/node_modules/expo-modules-core/expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/android/MavenPublicationExtension.kt
+@@ -27,6 +27,31 @@ import java.nio.file.Path
+ import kotlin.io.path.exists
+ import kotlin.io.path.toPath
+ 
++/**
++ * Finds the Android library software component Gradle wires for maven-publish.
++ * AGP usually registers `"release"` from `singleVariant("release")`, but IDE/tooling-only
++ * configuration runs can happen before components exist unless we defer publication wiring.
++ */
++private fun Project.findMavenSoftwareComponentPreferringRelease(): SoftwareComponent? {
++  components.findByName("release")?.let { return it }
++
++  return components.asMap.entries
++    .filter { entry ->
++      val name = entry.key
++      name.endsWith("Release", ignoreCase = true) &&
++        !name.endsWith("Debug", ignoreCase = true)
++    }
++    .minByOrNull { it.key.length }
++    ?.value
++}
++
++internal fun Project.resolveMavenSoftwareComponentForPublishing(): SoftwareComponent =
++  requireNotNull(findMavenSoftwareComponentPreferringRelease()) {
++    val registered = components.names.sorted().joinToString(", ")
++    "Expo maven publishing expected a Gradle software component named \"release\" (see AGP publishing.singleVariant(\"release\")). " +
++      "No suitable component found for '${path}'. Registered: [$registered]"
++  }
++
+ internal data class PublicationInfo(
+   val components: SoftwareComponent,
+   val groupId: String,
+@@ -36,7 +61,7 @@ internal data class PublicationInfo(
+   constructor(
+     project: Project,
+   ) : this(
+-    components = project.components.getByName("release"),
++    components = project.resolveMavenSoftwareComponentForPublishing(),
+     groupId = project.group.toString(),
+     artifactId = requireNotNull(project.androidLibraryExtension().namespace) {
+       "'android.namespace' is not defined"

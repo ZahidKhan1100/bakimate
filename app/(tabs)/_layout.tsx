@@ -3,6 +3,7 @@ import { BlurView } from "expo-blur";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Platform, StyleSheet, View, type ViewStyle } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -22,7 +23,7 @@ function TabIcon({ focused, color, name, isDark }: TabIconProps) {
     : {};
   return (
     <View style={[styles.iconPill, pillStyle]}>
-      <IconSymbol size={30} name={name} color={color} />
+      <IconSymbol size={32} name={name} color={color} />
     </View>
   );
 }
@@ -32,6 +33,12 @@ export default function TabLayout() {
   const theme = colorScheme === "dark" ? "dark" : "light";
   const isDark = theme === "dark";
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  /** Clear system nav buttons / gesture indicator (many Android builds report inset 0). */
+  const homeBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 28) : insets.bottom;
+  /** Cushion above the OS chrome so icons/labels aren’t cramped. */
+  const bottomPad = homeBottomInset + (Platform.OS === "ios" ? 8 : 10);
+  const tabBarInnerHeight = Platform.OS === "ios" ? 60 : 58;
 
   const tabBarBg = () =>
     Platform.OS === "ios" ? (
@@ -61,11 +68,19 @@ export default function TabLayout() {
           backgroundColor: "transparent",
           borderTopWidth: 0,
           elevation: 0,
-          height: Platform.OS === "ios" ? 92 : 74,
+          /** Total height includes bottom safe area — avoids overlapping system nav/gesture strip. */
+          height: tabBarInnerHeight + bottomPad,
+          paddingBottom: bottomPad,
+          paddingTop: Platform.OS === "ios" ? 6 : 4,
         },
         tabBarBackground: tabBarBg,
-        tabBarLabelStyle: { fontWeight: "800", fontSize: 10, marginBottom: Platform.OS === "ios" ? 2 : 6 },
-        tabBarItemStyle: { paddingTop: 8 },
+        tabBarLabelStyle: {
+          fontWeight: "800",
+          fontSize: 11,
+          marginBottom: 0,
+          marginTop: Platform.OS === "android" ? 2 : 0,
+        },
+        tabBarItemStyle: { paddingTop: Platform.OS === "ios" ? 6 : 4 },
       }}>
       <Tabs.Screen
         name="index"
@@ -118,10 +133,10 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   iconPill: {
-    minWidth: 56,
-    minHeight: 36,
+    minWidth: 58,
+    minHeight: 40,
     paddingHorizontal: 14,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",

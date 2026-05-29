@@ -6,7 +6,6 @@ import { api } from "@/lib/api";
 import type { Customer } from "@/lib/api-types";
 import { openBakimateDatabase } from "@/lib/db/bakimate-db";
 import { Qk } from "@/lib/hooks/query-keys";
-import { assertRecordingPremiumOrThrow } from "@/lib/premium-recording-access";
 import { queryClient } from "@/lib/query-client";
 
 const WEB_FALLBACK_STORAGE_KEY = "BAKIMATE_TX_OUTBOX_WEB_V3";
@@ -54,7 +53,7 @@ function summarizeAxios(e: unknown): string {
   return String(e);
 }
 
-/** Job will not retry (subscription/validation/policy). Tombstone locally. */
+/** Job will not retry (billing / validation). Tombstone locally — do **not** include 403: shop subscription may lapse offline then renew; keep row until POST succeeds or user fixes account. */
 function shouldSupersede(e: unknown): boolean {
   if (!axios.isAxiosError(e)) {
     return false;
@@ -62,7 +61,7 @@ function shouldSupersede(e: unknown): boolean {
 
   const s = e.response?.status;
 
-  return s === 402 || s === 403 || s === 422;
+  return s === 402 || s === 422;
 }
 
 /** Recoverable failures (timeouts, offline, server errors). */
@@ -178,6 +177,9 @@ async function bumpAttemptSQLite(db: NonNullable<Awaited<ReturnType<typeof openB
   );
 }
 
+/** Serialize outbox delivery so SQLite is never used concurrently (NetInfo + mount races). */
+let outboxFlushChain: Promise<void> = Promise.resolve();
+
 /**
  * Deliver queued POSTs in creation order. Successful rows are deleted.
  * Superseded (tombstoned) when API returns 402/403/422 — no infinite retry.
@@ -188,12 +190,24 @@ export async function flushTransactionOutbox(): Promise<{
   failed: number;
   superseded: number;
 }> {
+  const previous = outboxFlushChain;
+  let release!: () => void;
+  outboxFlushChain = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
   try {
-    await assertRecordingPremiumOrThrow();
-  } catch {
-    return { sent: 0, failed: 0, superseded: 0 };
+    return await flushTransactionOutboxImpl();
+  } finally {
+    release();
   }
+}
 
+async function flushTransactionOutboxImpl(): Promise<{
+  sent: number;
+  failed: number;
+  superseded: number;
+}> {
   const db = await openBakimateDatabase();
 
   if (db) {

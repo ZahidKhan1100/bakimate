@@ -438,12 +438,12 @@ export function ShopProfileEditor() {
         />
       </SectionCard>
 
-      {/* Save */}
+      {/* Save — always `primary` so the control stays visible on dark mesh (neutral is near-invisible on dark). */}
       <View style={styles.saveWrap}>
         <BigActionButton
           onPress={() => shopSave.mutate()}
           icon={savedFlash ? "checkmark-circle" : "checkmark"}
-          variant={savedFlash ? "success" : dirty ? "primary" : "neutral"}
+          variant={savedFlash ? "success" : "primary"}
           size="lg"
           label={savedFlash ? t("shop_saved_toast") : t("save_shop_profile")}
           accessibilityLabel={t("save_shop_profile")}

@@ -2,9 +2,12 @@ import { MeshBackdrop } from "@/components/ui/mesh-backdrop";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { loginWithAppleIdToken, loginWithDemo, loginWithGoogleIdToken } from "@/lib/auth-api";
+import { apiErrorMessage } from "@/lib/api";
+import { loginWithAppleIdToken, loginWithEmail, loginWithGoogleIdToken } from "@/lib/auth-api";
 import { isGoogleOAuthConfigured } from "@/lib/auth-google-config";
 import { applyAuthResponseToSession } from "@/lib/auth-session";
+import { setPendingVerificationEmail } from "@/lib/auth-verification-pending";
+import { getGoogleIdTokenFromAuthResponse } from "@/lib/google-auth-session";
 import {
   buildGoogleIdTokenAuthRequestPartialConfig,
   getGoogleOAuthClientIds,
@@ -14,10 +17,12 @@ import { setGoogleOauthReturnHref } from "@/lib/google-oauth-return-path";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as Google from "expo-auth-session/providers/google";
-import { Image } from "expo-image";
+import { BakimateLogoMark } from "@/components/bakimate-logo-mark";
+import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import axios from "axios";
 import {
   ActivityIndicator,
   Alert,
@@ -26,21 +31,22 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 WebBrowser.maybeCompleteAuthSession();
 
-const APP_ICON = require("@/assets/images/icon.jpg");
-
 export default function LoginScreen() {
   const { t } = useTranslation();
+  const router = useRouter();
   const scheme = useColorScheme();
   const theme = scheme === "dark" ? "dark" : "light";
   const isDark = theme === "dark";
   const headline = Colors[theme].text;
   const muted = isDark ? BakimateColors.neutralTextMutedDark : BakimateColors.neutralText;
+  const inputBorder = isDark ? BakimateColors.glassBorderDark : "rgba(15, 23, 42, 0.12)";
 
   const ids = getGoogleOAuthClientIds();
   const googleReady = isGoogleOAuthConfigured(ids);
@@ -62,18 +68,18 @@ export default function LoginScreen() {
 
   const [googleBusy, setGoogleBusy] = useState(false);
   const [appleBusy, setAppleBusy] = useState(false);
-  const [demoBusy, setDemoBusy] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
+  const handledGoogleIdTokenRef = useRef<string | null>(null);
+
+  const oauthBusy = googleBusy || appleBusy || emailBusy;
+
   useEffect(() => {
     void AppleAuthentication.isAvailableAsync().then(setAppleAvailable);
-  }, []);
-
-  const oauthErrorDetail = useCallback((e: unknown) => {
-    const err = e as { response?: { data?: { message?: unknown } }; message?: unknown };
-    const m = err?.response?.data?.message ?? err?.message;
-    return typeof m === "string" ? m : String(e);
   }, []);
 
   useEffect(() => {
@@ -83,28 +89,45 @@ export default function LoginScreen() {
         setGoogleBusy(false);
         return;
       }
+      if (response.type === "error") {
+        const p = response.params as Record<string, string | undefined> | undefined;
+        const msg =
+          typeof p?.error_description === "string"
+            ? p.error_description
+            : typeof p?.error === "string"
+              ? p.error
+              : t("login_try_again");
+        Alert.alert(t("login_failed_title"), msg);
+        setGoogleBusy(false);
+        return;
+      }
       if (response.type !== "success") {
         Alert.alert(t("login_failed_title"), t("login_try_again"));
         setGoogleBusy(false);
         return;
       }
-      const idTok = typeof response.params.id_token === "string" ? response.params.id_token : undefined;
+      const idTok = getGoogleIdTokenFromAuthResponse(response);
       if (!idTok) {
-        Alert.alert(t("login_failed_title"), t("google_no_id_token"));
+        Alert.alert(
+          t("login_failed_title"),
+          Platform.OS === "android" ? t("google_no_id_token_android") : t("google_no_id_token"),
+        );
         setGoogleBusy(false);
         return;
       }
+      if (handledGoogleIdTokenRef.current === idTok) return;
+      handledGoogleIdTokenRef.current = idTok;
       try {
         const auth = await loginWithGoogleIdToken(idTok);
         applyAuthResponseToSession(auth);
       } catch (e) {
-        Alert.alert(t("login_failed_title"), oauthErrorDetail(e));
+        Alert.alert(t("login_failed_title"), apiErrorMessage(e));
       } finally {
         setGoogleBusy(false);
       }
     }
     void consumeGoogle();
-  }, [response, t, oauthErrorDetail]);
+  }, [response, t]);
 
   const signInApple = async () => {
     setAppleBusy(true);
@@ -134,21 +157,9 @@ export default function LoginScreen() {
       ) {
         return;
       }
-      Alert.alert(t("login_failed_title"), oauthErrorDetail(e));
+      Alert.alert(t("login_failed_title"), apiErrorMessage(e));
     } finally {
       setAppleBusy(false);
-    }
-  };
-
-  const signInDemo = async () => {
-    setDemoBusy(true);
-    try {
-      const auth = await loginWithDemo();
-      applyAuthResponseToSession(auth);
-    } catch (e) {
-      Alert.alert(t("login_failed_title"), oauthErrorDetail(e));
-    } finally {
-      setDemoBusy(false);
     }
   };
 
@@ -171,8 +182,37 @@ export default function LoginScreen() {
         setGoogleBusy(false);
       }
     } catch (e) {
-      Alert.alert(t("login_failed_title"), oauthErrorDetail(e));
+      Alert.alert(t("login_failed_title"), apiErrorMessage(e));
       setGoogleBusy(false);
+    }
+  };
+
+  const signInEmail = async () => {
+    const em = email.trim().toLowerCase();
+    if (!em || !em.includes("@")) {
+      Alert.alert(t("error"), t("auth_invalid_email"));
+      return;
+    }
+    if (!password) {
+      Alert.alert(t("error"), t("auth_password_required"));
+      return;
+    }
+    setEmailBusy(true);
+    try {
+      const auth = await loginWithEmail({ email: em, password });
+      applyAuthResponseToSession(auth);
+    } catch (e) {
+      if (axios.isAxiosError(e) && e.response?.status === 403) {
+        const body = e.response?.data as { email_verified?: boolean } | undefined;
+        if (body?.email_verified === false) {
+          await setPendingVerificationEmail(em);
+          router.push("/verify-email");
+          return;
+        }
+      }
+      Alert.alert(t("login_failed_title"), apiErrorMessage(e));
+    } finally {
+      setEmailBusy(false);
     }
   };
 
@@ -187,16 +227,78 @@ export default function LoginScreen() {
         >
           <View style={styles.heroWrap}>
             <View style={styles.iconFrame}>
-              <Image source={APP_ICON} style={styles.iconImg} contentFit="cover" />
+              <BakimateLogoMark size={132} />
             </View>
             <Text style={[styles.brand, { color: headline }]}>{t("app_name")}</Text>
             <Text style={[styles.tagline, { color: muted }]}>{t("login_headline")}</Text>
           </View>
 
           <View style={styles.actionsWrap}>
+            <Text style={[styles.inputLabel, { color: muted }]}>{t("auth_field_email")}</Text>
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              placeholder={t("auth_field_email")}
+              placeholderTextColor={muted}
+              editable={!oauthBusy}
+              style={[styles.emailInput, { color: headline, borderColor: inputBorder }]}
+            />
+            <Text style={[styles.inputLabel, { color: muted }]}>{t("auth_field_password")}</Text>
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              placeholder={t("auth_field_password")}
+              placeholderTextColor={muted}
+              editable={!oauthBusy}
+              style={[styles.emailInput, { color: headline, borderColor: inputBorder }]}
+            />
+            <Pressable
+              onPress={() => void signInEmail()}
+              disabled={oauthBusy}
+              accessibilityRole="button"
+              accessibilityLabel={t("auth_sign_in_email")}
+              style={({ pressed }) => [
+                styles.emailPrimaryBtn,
+                { opacity: emailBusy ? 0.88 : pressed ? 0.92 : 1 },
+              ]}
+            >
+              {emailBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.emailPrimaryBtnText}>{t("auth_sign_in_email")}</Text>
+              )}
+            </Pressable>
+
+            <View style={styles.authLinksRow}>
+              <Pressable
+                onPress={() => router.push("/forgot-password")}
+                disabled={oauthBusy}
+                accessibilityRole="link"
+              >
+                <Text style={[styles.authLinkText, { color: BakimateColors.accentTeal }]}>{t("auth_forgot_link")}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push("/register")}
+                disabled={oauthBusy}
+                accessibilityRole="link"
+              >
+                <Text style={[styles.authLinkText, { color: BakimateColors.accentTeal }]}>{t("auth_register_link")}</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.dividerRow}>
+              <View style={[styles.dividerLine, { backgroundColor: isDark ? "rgba(148,163,184,0.35)" : "rgba(15,23,42,0.12)" }]} />
+              <Text style={[styles.dividerText, { color: muted }]}>{t("auth_email_divider")}</Text>
+              <View style={[styles.dividerLine, { backgroundColor: isDark ? "rgba(148,163,184,0.35)" : "rgba(15,23,42,0.12)" }]} />
+            </View>
+
             <Pressable
               onPress={() => void signInGooglePress()}
-              disabled={googleBusy || appleBusy}
+              disabled={oauthBusy}
               accessibilityRole="button"
               accessibilityLabel={t("continue_with_google")}
               style={({ pressed }) => [
@@ -221,10 +323,7 @@ export default function LoginScreen() {
             </Pressable>
 
             {Platform.OS === "ios" && appleAvailable ? (
-              <View
-                pointerEvents={appleBusy ? "none" : "auto"}
-                style={{ opacity: appleBusy ? 0.75 : 1 }}
-              >
+              <View pointerEvents={oauthBusy ? "none" : "auto"} style={{ opacity: oauthBusy ? 0.65 : 1 }}>
                 <AppleAuthentication.AppleAuthenticationButton
                   buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
                   buttonStyle={
@@ -246,34 +345,6 @@ export default function LoginScreen() {
             {Platform.OS === "android" ? (
               <Text style={[styles.androidHint, { color: muted }]}>{t("apple_ios_only_hint")}</Text>
             ) : null}
-
-            {/*
-              Small "Sign in for App Review" link. Calls POST /api/auth/demo.
-              Backend returns 403 unless DEMO_LOGIN_ENABLED=true on the server
-              (only set on the production env while the app is under review),
-              so real users tapping this will just see a friendly error.
-            */}
-            <Pressable
-              onPress={() => void signInDemo()}
-              disabled={demoBusy || googleBusy || appleBusy}
-              accessibilityRole="button"
-              accessibilityLabel={t("demo_signin_label")}
-              style={({ pressed }) => [
-                styles.demoLink,
-                { opacity: demoBusy ? 0.85 : pressed ? 0.6 : 1 },
-              ]}
-            >
-              {demoBusy ? (
-                <ActivityIndicator color={muted} />
-              ) : (
-                <>
-                  <Ionicons name="key-outline" size={14} color={muted} />
-                  <Text style={[styles.demoLinkText, { color: muted }]} numberOfLines={1}>
-                    {t("demo_signin_label")}
-                  </Text>
-                </>
-              )}
-            </Pressable>
           </View>
 
           {(!googleReady || (useProxy && googleReady)) && (
@@ -349,7 +420,6 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
-  iconImg: { width: "100%", height: "100%" },
   brand: { fontSize: 42, fontWeight: "900", letterSpacing: -0.8 },
   tagline: {
     marginTop: 4,
@@ -361,6 +431,35 @@ const styles = StyleSheet.create({
   },
 
   actionsWrap: { gap: 14, paddingTop: 8 },
+  inputLabel: { fontSize: 12, fontWeight: "800", marginBottom: 6, marginTop: 2 },
+  emailInput: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontWeight: "600",
+    fontSize: 17,
+  },
+  emailPrimaryBtn: {
+    marginTop: 6,
+    backgroundColor: BakimateColors.accentTeal,
+    borderRadius: 22,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emailPrimaryBtnText: { color: "#fff", fontWeight: "900", fontSize: 17 },
+  authLinksRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+    paddingHorizontal: 2,
+  },
+  authLinkText: { fontSize: 14, fontWeight: "800" },
+  dividerRow: { flexDirection: "row", alignItems: "center", marginVertical: 4 },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  dividerText: { paddingHorizontal: 12, fontSize: 13, fontWeight: "800" },
   googleBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -399,16 +498,6 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     textAlign: "center",
   },
-
-  demoLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 5,
-    paddingTop: 16,
-    paddingBottom: 4,
-  },
-  demoLinkText: { fontSize: 12, fontWeight: "700", letterSpacing: 0.2 },
 
   helpWrap: { marginTop: 20, gap: 10, alignItems: "center" },
   helpToggle: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6 },

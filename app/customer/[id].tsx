@@ -9,16 +9,20 @@ import { PersonAvatar } from "@/components/ui/person-avatar";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { setCustomerPhoto, useCustomerPhoto } from "@/lib/customer-photos";
+import { setCustomerPhoto, useCustomerPhoto, clearCustomerPhoto } from "@/lib/customer-photos";
 import { rotateCustomerBalancePublicLink } from "@/lib/customers-api";
 import { isPremiumRecordingBlockedError } from "@/lib/errors/premium-recording-blocked-error";
 import { formatCalendarDateShort } from "@/lib/format-dates";
 import { useCustomer } from "@/lib/hooks/useCustomer";
+import { useDeleteCustomer, usePatchCustomer } from "@/lib/hooks/useCustomers";
+import { useDeleteCustomerLedgerTransaction } from "@/lib/hooks/useLedgerTransactionMutations";
 import { useOutboxPendingForCustomer } from "@/lib/hooks/useOutboxPendingForCustomer";
+import { usePremiumEntitlementBootstrapBlocksUi } from "@/lib/hooks/usePremiumEntitlementBootstrapBlocksUi";
 import { usePremiumRecordingAccess } from "@/lib/hooks/usePremiumRecordingAccess";
 import { useShopCurrency } from "@/lib/hooks/useShopCurrency";
 import { Qk } from "@/lib/hooks/query-keys";
 import { formatMoneyMinor, goalProgressPaidRatio, parseRmToSen, suggestedWeeklyPaySen } from "@/lib/money";
+import { apiErrorMessage } from "@/lib/api";
 import { buildInstallmentReminderMessage } from "@/lib/payment-receipt";
 import { shareCreditInvoicePdf, shareCustomerPdf, sharePaymentReceiptPdf } from "@/lib/pdf-download";
 import { assertRecordingPremiumOrThrow } from "@/lib/premium-recording-access";
@@ -27,16 +31,18 @@ import { cancelPromiseReminder, schedulePromiseDueReminder } from "@/lib/promise
 import { fetchShopProfile } from "@/lib/shop-api";
 import { profileToReceiptBlurb, resolveShopProfile } from "@/lib/shop-profile";
 import { openWhatsAppText } from "@/lib/whatsapp";
+import { normalizePhoneForWaMe } from "@/lib/phone-wa-me";
 import { queryClient } from "@/lib/query-client";
 import { useSessionStore } from "@/stores/session-store";
 import type { CustomerLedgerTransactionApi, CustomerPromise } from "@/lib/api-types";
 import { Ionicons } from "@expo/vector-icons";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useIsRestoring } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
+import { isAxiosError } from "axios";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -96,25 +102,34 @@ export default function CustomerDetailScreen() {
   const headline = Colors[theme].text;
   const muted = isDark ? BakimateColors.neutralTextMutedDark : BakimateColors.neutralText;
 
-  const { data: customer, isLoading, error, refetch } = useCustomer(customerId, {
+  const isQueryRestoring = useIsRestoring();
+
+  const {
+    data: customer,
+    isLoading,
+    error,
+    refetch,
+    isPartialListFallback,
+  } = useCustomer(customerId, {
     enabled: Boolean(token) && Number.isFinite(customerId) && customerId > 0,
   });
 
   const shopProfileQ = useQuery({
     queryKey: Qk.shopProfile,
     queryFn: fetchShopProfile,
-    enabled: Boolean(token),
+    enabled: Boolean(token) && !isQueryRestoring,
     staleTime: 30 * 1000,
   });
 
   const currency = useShopCurrency();
   const photoUri = useCustomerPhoto(customerId);
   const premiumRecording = usePremiumRecordingAccess(Boolean(token));
+  const premiumBootstrapBlocks = usePremiumEntitlementBootstrapBlocksUi(premiumRecording.isLoading);
   const pendingOutbox = useOutboxPendingForCustomer(customerId, Boolean(token));
 
   const [sheetType, setSheetType] = useState<"credit" | "payment" | null>(null);
+  const [editingTx, setEditingTx] = useState<CustomerLedgerTransactionApi | null>(null);
   const [duitnowQrOpen, setDuitnowQrOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [promiseOpen, setPromiseOpen] = useState(false);
   const [promiseAmtRm, setPromiseAmtRm] = useState("");
   const [promiseDateYmd, setPromiseDateYmd] = useState(() => addDaysLocal(7));
@@ -122,6 +137,13 @@ export default function CustomerDetailScreen() {
   const [pdfBusy, setPdfBusy] = useState<"ledger" | "settlement" | null>(null);
   const [invoiceBusyId, setInvoiceBusyId] = useState<number | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [editCustomerOpen, setEditCustomerOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+
+  const patchCustomerMu = usePatchCustomer();
+  const deleteCustomerMu = useDeleteCustomer();
+  const deleteLedgerTxMu = useDeleteCustomerLedgerTransaction(customerId);
 
   const quickItems = useMemo(() => {
     const rows = shopProfileQ.data?.credit_quick_items ?? [];
@@ -195,7 +217,7 @@ export default function CustomerDetailScreen() {
 
   const requirePremium = () => {
     const status = premiumRecording.data;
-    if (premiumRecording.isLoading) return false;
+    if (premiumBootstrapBlocks) return false;
     if (status?.requiresPremium === true && !status.entitled) {
       router.push("/paywall");
       return false;
@@ -206,8 +228,39 @@ export default function CustomerDetailScreen() {
   const openSheet = (kind: "credit" | "payment") => {
     if (!requirePremium()) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setEditingTx(null);
     setSheetType(kind);
   };
+
+  const openEditLedgerTx = (tx: CustomerLedgerTransactionApi) => {
+    if (!requirePremium()) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setEditingTx(tx);
+    setSheetType(tx.type === "credit" ? "credit" : "payment");
+  };
+
+  const confirmDeleteLedgerTx = (tx: CustomerLedgerTransactionApi) => {
+    Alert.alert(t("customer_tx_delete_title"), t("customer_tx_delete_body"), [
+      { text: t("cancel"), style: "cancel" },
+      {
+        text: t("customer_tx_delete_confirm"),
+        style: "destructive",
+        onPress: () => {
+          deleteLedgerTxMu.mutate(tx.id, {
+            onSuccess: () => void refetch(),
+            onError: (e: unknown) => {
+              if (isPremiumRecordingBlockedError(e)) {
+                router.push("/paywall");
+                return;
+              }
+              Alert.alert(t("error"), e instanceof Error ? e.message : String(e));
+            },
+          });
+        },
+      },
+    ]);
+  };
+
 
   const openDuitnowQr = () => {
     if (duitnowQrUrl) {
@@ -222,6 +275,10 @@ export default function CustomerDetailScreen() {
 
   const onRemind = async () => {
     if (!customer) return;
+    if (normalizePhoneForWaMe(customer.phone) === null) {
+      Alert.alert(t("error"), t("contact_phone_required_whatsapp"));
+      return;
+    }
     const session = useSessionStore.getState();
     const shopBlur = profileToReceiptBlurb(resolveShopProfile(session.shopProfiles ?? {}, session.user?.id));
     const msg = buildInstallmentReminderMessage(customer.name, customer.balance_sen, shopBlur);
@@ -315,7 +372,7 @@ export default function CustomerDetailScreen() {
     }
     setPdfBusy(kind);
     try {
-      await shareCustomerPdf(customer.id, kind);
+      await shareCustomerPdf(customer.id, kind, { whatsappPhone: customer.phone });
     } catch (e: unknown) {
       const code =
         typeof e === "object" && e !== null && "statusCode" in e && typeof (e as { statusCode?: unknown }).statusCode === "number"
@@ -341,9 +398,9 @@ export default function CustomerDetailScreen() {
     setInvoiceBusyId(tx.id);
     try {
       if (tx.type === "credit") {
-        await shareCreditInvoicePdf(customer.id, tx.id);
+        await shareCreditInvoicePdf(customer.id, tx.id, { whatsappPhone: customer.phone });
       } else {
-        await sharePaymentReceiptPdf(customer.id, tx.id);
+        await sharePaymentReceiptPdf(customer.id, tx.id, { whatsappPhone: customer.phone });
       }
     } catch (e: unknown) {
       Alert.alert(t("error"), e instanceof Error ? e.message : String(e));
@@ -385,14 +442,14 @@ export default function CustomerDetailScreen() {
     );
   }
 
-  if (error || !customer) {
+  if (!customer) {
     return (
       <View style={styles.flex}>
         <MeshBackdrop isDark={isDark} />
         <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
           <View style={{ padding: 20 }}>
             <Text style={{ color: BakimateColors.danger, fontWeight: "700" }}>
-              {String(error ?? t("customer_not_found"))}
+              {error != null ? apiErrorMessage(error) : t("customer_not_found")}
             </Text>
             <Pressable onPress={() => void refetch()} style={{ marginTop: 16 }}>
               <Text style={{ color: BakimateColors.accentTeal, fontWeight: "800" }}>{t("retry")}</Text>
@@ -403,6 +460,58 @@ export default function CustomerDetailScreen() {
     );
   }
 
+  const openEditCustomer = () => {
+    setEditName(customer.name);
+    setEditPhone(customer.phone?.trim() ?? "");
+    setEditCustomerOpen(true);
+  };
+
+  const saveCustomerEdit = () => {
+    const name = editName.trim();
+    if (!name) {
+      Alert.alert(t("error"), t("customer_name_required"));
+      return;
+    }
+    patchCustomerMu.mutate(
+      { customerId, payload: { name, phone: editPhone.trim() || null } },
+      {
+        onSuccess: () => setEditCustomerOpen(false),
+        onError: (e: unknown) => {
+          if (isAxiosError(e) && e.response?.status === 403) {
+            router.push("/paywall");
+            return;
+          }
+          Alert.alert(t("error"), apiErrorMessage(e));
+        },
+      },
+    );
+  };
+
+  const confirmDeleteCustomer = () => {
+    Alert.alert(t("delete_customer_title"), t("delete_customer_body"), [
+      { text: t("cancel"), style: "cancel" },
+      {
+        text: t("delete"),
+        style: "destructive",
+        onPress: () =>
+          deleteCustomerMu.mutate(customerId, {
+            onSuccess: async () => {
+              await clearCustomerPhoto(customerId);
+              setEditCustomerOpen(false);
+              router.back();
+            },
+            onError: (e: unknown) => {
+              if (isAxiosError(e) && e.response?.status === 403) {
+                router.push("/paywall");
+                return;
+              }
+              Alert.alert(t("error"), apiErrorMessage(e));
+            },
+          }),
+      },
+    ]);
+  };
+
   const owes = customer.balance_sen > 0;
   const goalRatio = goalProgressPaidRatio(customer.balance_sen, customer.goal_amount_sen ?? null);
   const weekHintSen = suggestedWeeklyPaySen(customer.balance_sen, customer.goal_target_date ?? null);
@@ -412,7 +521,7 @@ export default function CustomerDetailScreen() {
       <MeshBackdrop isDark={isDark} />
 
       <SafeAreaView style={styles.safe} edges={["top"]}>
-        {/* Top bar: back arrow only */}
+        {/* Top bar: back + edit customer */}
         <View style={styles.topBar}>
           <Pressable
             onPress={() => router.back()}
@@ -422,6 +531,19 @@ export default function CustomerDetailScreen() {
           >
             <Ionicons name="chevron-back" size={32} color={headline} />
           </Pressable>
+          <View style={{ flex: 1 }} />
+          <Pressable
+            onPress={() => {
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              openEditCustomer();
+            }}
+            hitSlop={16}
+            accessibilityRole="button"
+            accessibilityLabel={t("customer_edit_title")}
+            style={({ pressed }) => [styles.backHit, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Ionicons name="create-outline" size={28} color={headline} />
+          </Pressable>
         </View>
 
         <ScrollView
@@ -429,6 +551,23 @@ export default function CustomerDetailScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {isPartialListFallback ? (
+            <View
+              style={[
+                styles.cacheHintPill,
+                {
+                  borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.12)",
+                  backgroundColor: isDark ? "rgba(15,23,42,0.55)" : "rgba(255,255,255,0.92)",
+                },
+              ]}
+            >
+              <Ionicons name="cloud-offline-outline" size={16} color={BakimateColors.accentTeal} />
+              <Text style={[styles.cacheHintText, { color: muted }]}>
+                {t("customer_partial_cache_hint")}
+              </Text>
+            </View>
+          ) : null}
+
           {/* Hero */}
           <View style={styles.heroWrap}>
             <Pressable
@@ -513,7 +652,7 @@ export default function CustomerDetailScreen() {
               label={t("quick_gave")}
               accessibilityLabel={t("quick_gave")}
               style={styles.actionBtn}
-              disabled={Platform.OS !== "web" && premiumRecording.isLoading}
+              disabled={premiumBootstrapBlocks}
             />
             <BigActionButton
               onPress={() => openSheet("payment")}
@@ -523,7 +662,7 @@ export default function CustomerDetailScreen() {
               label={t("quick_got")}
               accessibilityLabel={t("quick_got")}
               style={styles.actionBtn}
-              disabled={Platform.OS !== "web" && premiumRecording.isLoading}
+              disabled={premiumBootstrapBlocks}
             />
           </View>
 
@@ -590,20 +729,7 @@ export default function CustomerDetailScreen() {
             </Pressable>
           </View>
 
-          {/* More options chevron */}
-          <Pressable
-            onPress={() => setMoreOpen((p) => !p)}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.moreToggle, { opacity: pressed ? 0.7 : 1 }]}
-          >
-            <Ionicons name={moreOpen ? "chevron-up" : "chevron-down"} size={20} color={muted} />
-            <Text style={[styles.moreToggleText, { color: muted }]}>
-              {t("promise_card_title")} · {t("customer_documents_title")}
-            </Text>
-          </Pressable>
-
-          {moreOpen ? (
-            <View style={styles.moreSection}>
+          <View style={styles.moreSection}>
               {goalRatio !== null ? (
                 <GlassSurface isDark={isDark} style={styles.card} contentStyle={styles.cardPad}>
                   <GoalProgressRing
@@ -748,36 +874,104 @@ export default function CustomerDetailScreen() {
                               </Text>
                             ) : null}
                           </View>
-                          <Text style={[styles.txAmt, { color: accent }]}>
-                            {isCredit ? "+" : "−"}
-                            {formatMoneyMinor(tx.amount_sen, currency, i18n.language)}
-                          </Text>
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={t("customer_tx_pdf_a11y")}
-                            hitSlop={8}
-                            disabled={invoiceBusyId !== null}
-                            onPress={() => void openSingleEntryPdf(tx)}
-                            style={({ pressed }) => [
-                              styles.txPdfPill,
-                              {
-                                borderColor: BakimateColors.accentTeal,
-                                backgroundColor: isDark ? "rgba(46, 196, 182, 0.12)" : "rgba(46, 196, 182, 0.1)",
-                                opacity: invoiceBusyId === tx.id ? 1 : pressed ? 0.82 : 1,
-                              },
-                            ]}
-                          >
-                            {invoiceBusyId === tx.id ? (
-                              <ActivityIndicator size="small" color={BakimateColors.accentTeal} />
-                            ) : (
-                              <>
-                                <Ionicons name="document-text-outline" size={18} color={BakimateColors.accentTeal} />
-                                <Text style={[styles.txPdfPillText, { color: BakimateColors.accentTeal }]}>
-                                  {t("customer_tx_pdf_btn")}
-                                </Text>
-                              </>
-                            )}
-                          </Pressable>
+                          <View style={styles.txTrailingCol}>
+                            <View style={styles.txAmtRow}>
+                              <Text style={[styles.txAmt, { color: accent }]}>
+                                {isCredit ? "+" : "−"}
+                                {formatMoneyMinor(tx.amount_sen, currency, i18n.language)}
+                              </Text>
+                              <View style={styles.txLedgerIconActions}>
+                                <Pressable
+                                  accessibilityRole="button"
+                                  accessibilityLabel={
+                                    isCredit
+                                      ? t("customer_tx_edit_credit_a11y")
+                                      : t("customer_tx_edit_payment_a11y")
+                                  }
+                                  hitSlop={12}
+                                  disabled={invoiceBusyId !== null || deleteLedgerTxMu.isPending}
+                                  onPress={() => openEditLedgerTx(tx)}
+                                  style={({ pressed }) => [
+                                    styles.txIconActionWrap,
+                                    {
+                                      backgroundColor: isCredit
+                                        ? isDark
+                                          ? `${BakimateColors.danger}20`
+                                          : `${BakimateColors.danger}16`
+                                        : isDark
+                                          ? `${BakimateColors.success}20`
+                                          : `${BakimateColors.success}16`,
+                                      opacity: pressed ? 0.78 : 1,
+                                    },
+                                  ]}
+                                >
+                                  <Ionicons
+                                    name="create-outline"
+                                    size={20}
+                                    color={isCredit ? BakimateColors.danger : BakimateColors.success}
+                                  />
+                                </Pressable>
+                                <Pressable
+                                  accessibilityRole="button"
+                                  accessibilityLabel={
+                                    isCredit
+                                      ? t("customer_tx_delete_credit_a11y")
+                                      : t("customer_tx_delete_payment_a11y")
+                                  }
+                                  hitSlop={12}
+                                  disabled={invoiceBusyId !== null || deleteLedgerTxMu.isPending}
+                                  onPress={() => {
+                                    if (!requirePremium()) return;
+                                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                                    confirmDeleteLedgerTx(tx);
+                                  }}
+                                  style={({ pressed }) => [
+                                    styles.txIconActionWrap,
+                                    {
+                                      backgroundColor: isDark
+                                        ? `${BakimateColors.danger}22`
+                                        : `${BakimateColors.danger}18`,
+                                      opacity: pressed ? 0.78 : 1,
+                                    },
+                                  ]}
+                                >
+                                  <Ionicons name="trash-outline" size={20} color={BakimateColors.danger} />
+                                </Pressable>
+                              </View>
+                            </View>
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={t("customer_tx_pdf_a11y")}
+                              hitSlop={8}
+                              disabled={invoiceBusyId !== null}
+                              onPress={() => void openSingleEntryPdf(tx)}
+                              style={({ pressed }) => [
+                                styles.txPdfPill,
+                                {
+                                  borderColor: BakimateColors.accentTeal,
+                                  backgroundColor: isDark
+                                    ? "rgba(46, 196, 182, 0.12)"
+                                    : "rgba(46, 196, 182, 0.1)",
+                                  opacity: invoiceBusyId === tx.id ? 1 : pressed ? 0.82 : 1,
+                                },
+                              ]}
+                            >
+                              {invoiceBusyId === tx.id ? (
+                                <ActivityIndicator size="small" color={BakimateColors.accentTeal} />
+                              ) : (
+                                <>
+                                  <Ionicons
+                                    name="document-text-outline"
+                                    size={18}
+                                    color={BakimateColors.accentTeal}
+                                  />
+                                  <Text style={[styles.txPdfPillText, { color: BakimateColors.accentTeal }]}>
+                                    {t("customer_tx_pdf_btn")}
+                                  </Text>
+                                </>
+                              )}
+                            </Pressable>
+                          </View>
                         </View>
                       );
                     })}
@@ -844,23 +1038,93 @@ export default function CustomerDetailScreen() {
                 ) : null}
               </GlassSurface>
             </View>
-          ) : null}
         </ScrollView>
       </SafeAreaView>
 
-      {/* Record transaction sheet */}
-      <RecordTransactionSheet
-        visible={sheetType !== null}
-        mode={sheetType}
-        customer={customer}
-        currency={currency}
+      {/* Edit customer: name, phone, delete */}
+      <BottomSheet
+        visible={editCustomerOpen}
+        onClose={() => setEditCustomerOpen(false)}
         isDark={isDark}
-        quickItems={quickItems}
-        duitnowQrUrl={duitnowQrUrl || null}
-        onClose={() => setSheetType(null)}
-        onOpenDuitnowQr={openDuitnowQr}
-        onSaved={() => void refetch()}
-      />
+        scrollable
+      >
+        <Text style={[styles.cardTitle, { color: headline, marginBottom: 8 }]}>{t("customer_edit_title")}</Text>
+
+        <Text style={[styles.label, { color: muted }]}>{t("customer_name")}</Text>
+        <TextInput
+          value={editName}
+          onChangeText={setEditName}
+          autoCapitalize="words"
+          style={[
+            styles.input,
+            { borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.12)", color: headline },
+          ]}
+        />
+
+        <Text style={[styles.label, { color: muted }]}>{t("phone_optional")}</Text>
+        <TextInput
+          value={editPhone}
+          onChangeText={setEditPhone}
+          keyboardType="phone-pad"
+          style={[
+            styles.input,
+            { borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.12)", color: headline },
+          ]}
+        />
+
+        <Pressable
+          onPress={() => void saveCustomerEdit()}
+          disabled={patchCustomerMu.isPending}
+          style={({ pressed }) => [
+            styles.editSaveBtn,
+            {
+              backgroundColor: BakimateColors.primary,
+              opacity: patchCustomerMu.isPending ? 0.6 : pressed ? 0.9 : 1,
+            },
+          ]}
+        >
+          {patchCustomerMu.isPending ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.editSaveBtnText}>{t("customer_save_changes")}</Text>
+          )}
+        </Pressable>
+
+        <Pressable
+          onPress={() => confirmDeleteCustomer()}
+          disabled={deleteCustomerMu.isPending}
+          style={({ pressed }) => [
+            styles.editDeleteBtn,
+            {
+              borderColor: BakimateColors.danger,
+              opacity: deleteCustomerMu.isPending ? 0.6 : pressed ? 0.88 : 1,
+            },
+          ]}
+        >
+          <Ionicons name="trash-outline" size={20} color={BakimateColors.danger} />
+          <Text style={[styles.editDeleteBtnText, { color: BakimateColors.danger }]}>{t("delete_customer")}</Text>
+        </Pressable>
+      </BottomSheet>
+
+      {/* Record transaction sheet */}
+      {customer ? (
+        <RecordTransactionSheet
+          visible={sheetType !== null}
+          mode={sheetType}
+          editingTransaction={editingTx}
+          customer={customer}
+          currency={currency}
+          isDark={isDark}
+          quickItems={quickItems}
+          duitnowQrUrl={duitnowQrUrl || null}
+          onClose={() => {
+            setSheetType(null);
+            setEditingTx(null);
+          }}
+          onOpenDuitnowQr={openDuitnowQr}
+          onSaved={() => void refetch()}
+        />
+      ) : null}
 
       {/* Promise sheet (kept simple — text inputs, hidden behind chevron) */}
       <BottomSheet visible={promiseOpen} onClose={() => setPromiseOpen(false)} isDark={isDark} scrollable>
@@ -979,6 +1243,7 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
+    width: "100%",
     paddingHorizontal: 8,
     paddingTop: 4,
     paddingBottom: 6,
@@ -1017,6 +1282,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   syncText: { fontSize: 12, fontWeight: "800" },
+
+  cacheHintPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  cacheHintText: { flex: 1, fontSize: 13, fontWeight: "600", lineHeight: 18 },
 
   metaRow: {
     marginTop: 14,
@@ -1058,17 +1335,7 @@ const styles = StyleSheet.create({
     }),
   },
 
-  moreToggle: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 12,
-    marginTop: 4,
-  },
-  moreToggleText: { fontSize: 13, fontWeight: "800" },
-
-  moreSection: { gap: 12, marginTop: 4 },
+  moreSection: { gap: 12, marginTop: 12 },
 
   card: {},
   cardPad: { padding: 18, gap: 10 },
@@ -1122,6 +1389,16 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  txTrailingCol: { alignItems: "flex-end", gap: 6 },
+  txAmtRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" },
+  txLedgerIconActions: { flexDirection: "row", alignItems: "center", gap: 6 },
+  txIconActionWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   txIcon: {
     width: 40,
     height: 40,
@@ -1161,6 +1438,27 @@ const styles = StyleSheet.create({
   },
 
   sheetFooter: { flexDirection: "row", gap: 12, marginTop: 16 },
+
+  editSaveBtn: {
+    marginTop: 16,
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 52,
+  },
+  editSaveBtnText: { color: "#fff", fontWeight: "900", fontSize: 16 },
+  editDeleteBtn: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderRadius: 16,
+    paddingVertical: 14,
+  },
+  editDeleteBtnText: { fontWeight: "900", fontSize: 15 },
 
   qrModalRoot: { flex: 1, backgroundColor: "rgba(0,0,0,0.94)" },
   qrCloseTop: {

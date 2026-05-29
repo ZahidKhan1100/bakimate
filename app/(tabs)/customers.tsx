@@ -2,6 +2,7 @@ import { AddCustomerSheet } from "@/components/add-customer-sheet";
 import { EmptyHero } from "@/components/ui/empty-hero";
 import { MeshBackdrop } from "@/components/ui/mesh-backdrop";
 import { PersonRow } from "@/components/ui/person-row";
+import { ScreenHeroHeader } from "@/components/ui/screen-hero-header";
 import { SignInHero } from "@/components/ui/sign-in-hero";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
@@ -13,15 +14,19 @@ import { useShopCurrency } from "@/lib/hooks/useShopCurrency";
 import { shareCustomerReceipt } from "@/lib/share-receipt";
 import { useSessionStore } from "@/stores/session-store";
 import { Ionicons } from "@expo/vector-icons";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { FlashList } from "@shopify/flash-list";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const TAB_PAD = Platform.OS === "ios" ? 108 : 96;
+const FAB_SIZE = 68;
+/** Space between FAB bottom and top edge of tab bar (matches taller safe-area tab bar). */
+const FAB_MARGIN_ABOVE_TAB = 14;
 
 export default function CustomersScreen() {
   const { t } = useTranslation();
@@ -33,6 +38,9 @@ export default function CustomersScreen() {
 
   const token = useSessionStore((s) => s.token);
   const shopCurrency = useShopCurrency();
+  const tabBarHeight = useBottomTabBarHeight();
+  const fabBottomOffset = tabBarHeight + FAB_MARGIN_ABOVE_TAB;
+  const listPaddingBottom = tabBarHeight + FAB_MARGIN_ABOVE_TAB + FAB_SIZE + 36;
 
   const { data, isLoading, isRefetching, refetch, error } = useCustomersPage(1, {
     enabled: Boolean(token),
@@ -84,7 +92,14 @@ export default function CustomersScreen() {
       <View style={styles.flex}>
         <MeshBackdrop isDark={isDark} />
         <SafeAreaView style={styles.safe} edges={["top"]}>
-          <Text style={[styles.title, { color: headline }]}>{t("customers_title")}</Text>
+          <ScreenHeroHeader
+            eyebrow={t("customers_eyebrow")}
+            title={t("customers_title")}
+            subtitle={t("sign_in_prompt")}
+            headlineColor={headline}
+            mutedColor={muted}
+            marginBottom={16}
+          />
           <SignInHero isDark={isDark} />
         </SafeAreaView>
       </View>
@@ -98,14 +113,38 @@ export default function CustomersScreen() {
       <MeshBackdrop isDark={isDark} />
 
       <SafeAreaView style={styles.safe} edges={["top"]}>
-        <View style={styles.topRow}>
-          <Text style={[styles.title, { color: headline }]}>{t("customers_title")}</Text>
-          <Text style={[styles.count, { color: muted }]}>{rows.length}</Text>
-        </View>
+        <ScreenHeroHeader
+          eyebrow={t("customers_eyebrow")}
+          title={t("customers_title")}
+          subtitle={t("customers_tagline")}
+          headlineColor={headline}
+          mutedColor={muted}
+          marginBottom={14}
+          trailing={
+            <View
+              style={[
+                styles.countChip,
+                {
+                  backgroundColor: isDark ? "rgba(46, 196, 182, 0.12)" : "rgba(0, 135, 90, 0.08)",
+                  borderColor: isDark ? BakimateColors.accentTeal + "44" : BakimateColors.primary + "33",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.countChipText,
+                  { color: isDark ? BakimateColors.accentTeal : BakimateColors.primary },
+                ]}
+              >
+                {rows.length}
+              </Text>
+            </View>
+          }
+        />
 
         {isLoading ? (
-          <ActivityIndicator style={{ marginTop: 24 }} color={BakimateColors.accentTeal} />
-        ) : error ? (
+          <ActivityIndicator style={{ marginTop: 12 }} color={BakimateColors.accentTeal} />
+        ) : error && rows.length === 0 ? (
           <Text style={{ color: BakimateColors.danger, marginTop: 12 }}>{String((error as Error).message)}</Text>
         ) : (
           <View style={styles.listWrap}>
@@ -119,7 +158,7 @@ export default function CustomersScreen() {
                   tintColor={BakimateColors.accentTeal}
                 />
               }
-              contentContainerStyle={{ paddingBottom: TAB_PAD + 80 }}
+              contentContainerStyle={{ paddingBottom: listPaddingBottom }}
               ListEmptyComponent={
                 <EmptyHero
                   icon="people"
@@ -146,7 +185,7 @@ export default function CustomersScreen() {
         )}
       </SafeAreaView>
 
-      <View style={[styles.fabWrap, { bottom: TAB_PAD - 8 }]} pointerEvents="box-none">
+      <View style={[styles.fabWrap, { bottom: fabBottomOffset }]} pointerEvents="box-none">
         <Pressable
           onPress={() => {
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -154,9 +193,16 @@ export default function CustomersScreen() {
           }}
           accessibilityRole="button"
           accessibilityLabel={t("add_customer")}
-          style={({ pressed }) => [styles.fab, { opacity: pressed ? 0.9 : 1 }]}
+          style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
         >
-          <Ionicons name="person-add" size={28} color="#fff" />
+          <LinearGradient
+            colors={[BakimateColors.success, "#059669"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.fab}
+          >
+            <Ionicons name="person-add" size={28} color="#fff" />
+          </LinearGradient>
         </Pressable>
       </View>
 
@@ -168,21 +214,20 @@ export default function CustomersScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   safe: { flex: 1, backgroundColor: "transparent", paddingHorizontal: 20 },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    marginBottom: 12,
+  countChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignSelf: "flex-start",
   },
-  title: { fontSize: 32, fontWeight: "900", letterSpacing: -0.6 },
-  count: { fontSize: 18, fontWeight: "800" },
+  countChipText: { fontSize: 13, fontWeight: "900", letterSpacing: 0.8 },
   listWrap: { flex: 1, minHeight: 2 },
   fabWrap: { position: "absolute", right: 22, alignItems: "flex-end" },
   fab: {
     width: 68,
     height: 68,
     borderRadius: 34,
-    backgroundColor: BakimateColors.success,
     alignItems: "center",
     justifyContent: "center",
     ...Platform.select({

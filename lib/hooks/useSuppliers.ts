@@ -1,5 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useIsRestoring, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 
+import { pickSupplierFromQueryCaches } from "@/lib/entity-query-fallback";
+import { useAppQueriesEnabled, withOfflineQueryDisplay } from "@/lib/hooks/useAppQueriesEnabled";
 import { Qk } from "@/lib/hooks/query-keys";
 import {
   createSupplier,
@@ -9,21 +12,54 @@ import {
   recordSupplierLedgerEntry,
 } from "@/lib/suppliers-api";
 
+function useSupplierFallbackVersion(queryClient: ReturnType<typeof useQueryClient>, supplierId: number): number {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    return queryClient.getQueryCache().subscribe((event) => {
+      const key = event.query?.queryKey;
+      if (!Array.isArray(key)) {
+        return;
+      }
+      if (key[0] === "suppliers" || (key[0] === "supplier" && key[1] === supplierId)) {
+        setV((n) => n + 1);
+      }
+    });
+  }, [queryClient, supplierId]);
+  return v;
+}
+
 export function useSuppliersPage(page = 1, options?: { enabled?: boolean }) {
-  return useQuery({
+  const enabled = useAppQueriesEnabled(options?.enabled ?? true);
+  const q = useQuery({
     queryKey: Qk.suppliersPage(page),
     queryFn: () => fetchSuppliersPage(page),
-    enabled: options?.enabled ?? true,
+    enabled,
   });
+
+  return withOfflineQueryDisplay(q);
 }
 
 export function useSupplier(supplierId: number, options?: { enabled?: boolean }) {
-  return useQuery({
+  const qc = useQueryClient();
+  const fv = useSupplierFallbackVersion(qc, supplierId);
+  const isRestoring = useIsRestoring();
+  const q = useQuery({
     queryKey: Qk.supplier(supplierId),
     queryFn: () => fetchSupplier(supplierId),
-    enabled: (options?.enabled ?? true) && supplierId > 0,
+    enabled: (options?.enabled ?? true) && supplierId > 0 && !isRestoring,
     staleTime: 15_000,
   });
+
+  const listFallback = useMemo(() => pickSupplierFromQueryCaches(qc, supplierId), [qc, supplierId, fv]);
+  const data = q.data ?? listFallback ?? undefined;
+  const isPartialListFallback = !q.data && Boolean(listFallback);
+
+  return {
+    ...q,
+    data,
+    isLoading: q.isPending && !data,
+    isPartialListFallback,
+  };
 }
 
 export function useCreateSupplier() {

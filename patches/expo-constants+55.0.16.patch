@@ -1,0 +1,26 @@
+diff --git a/node_modules/expo-constants/scripts/get-app-config-android.gradle b/node_modules/expo-constants/scripts/get-app-config-android.gradle
+index 7758672..6ee5815 100644
+--- a/node_modules/expo-constants/scripts/get-app-config-android.gradle
++++ b/node_modules/expo-constants/scripts/get-app-config-android.gradle
+@@ -2,14 +2,19 @@
+ 
+ import org.apache.tools.ant.taskdefs.condition.Os
+ 
++/** Android Studio Gradle often inherits a sanitized PATH (`node` not found). Match settings.gradle + app/react { nodeExecutableAndArgs }. */
++def bakimateStamp = new File(rootProject.projectDir as File, ".gradle/bakimate-node-binary.txt")
++def nodeFromStamp = bakimateStamp.exists() ? bakimateStamp.getText("UTF-8").trim() : ''
++def nodeFromEnv = System.getenv("NODE_BINARY")?.trim()
++def nodeCli = (nodeFromEnv && !nodeFromEnv.isEmpty()) ? nodeFromEnv : (nodeFromStamp ?: "node")
+ 
+ def expoConstantsDir = project.providers.exec {
+   workingDir(projectDir)
+-  commandLine("node", "-e", "console.log(require('path').dirname(require.resolve('expo-constants/package.json')));")
++  commandLine(nodeCli, "-e", "console.log(require('path').dirname(require.resolve('expo-constants/package.json')));")
+ }.standardOutput.asText.get().trim()
+ 
+ def config = project.hasProperty("react") ? project.react : [];
+-def nodeExecutableAndArgs = config.nodeExecutableAndArgs ?: ["node"]
++def nodeExecutableAndArgs = config.nodeExecutableAndArgs ?: [nodeCli]
+ 
+ afterEvaluate {
+   def expoGradleExtension = gradle.extensions.findByName("expoGradle")

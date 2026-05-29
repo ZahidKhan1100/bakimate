@@ -6,10 +6,14 @@ import { PersonAvatar } from "@/components/ui/person-avatar";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import type { SupplierLedgerTransactionApi } from "@/lib/api-types";
+import { usePremiumEntitlementBootstrapBlocksUi } from "@/lib/hooks/usePremiumEntitlementBootstrapBlocksUi";
 import { usePremiumRecordingAccess } from "@/lib/hooks/usePremiumRecordingAccess";
 import { useShopCurrency } from "@/lib/hooks/useShopCurrency";
 import { useSupplier } from "@/lib/hooks/useSuppliers";
 import { formatMoneyMinor } from "@/lib/money";
+import { apiErrorMessage } from "@/lib/api";
+import { shareSupplierPaymentOutPdf, shareSupplierPurchasePdf } from "@/lib/pdf-download";
 import { useSessionStore } from "@/stores/session-store";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -19,6 +23,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -42,16 +47,24 @@ export default function SupplierDetailScreen() {
 
   const currency = useShopCurrency();
   const premiumRecording = usePremiumRecordingAccess(Boolean(token));
+  const premiumBootstrapBlocks = usePremiumEntitlementBootstrapBlocksUi(premiumRecording.isLoading);
 
-  const sq = useSupplier(supplierId, {
+  const {
+    data: supplier,
+    error: supplierError,
+    isLoading: supplierLoading,
+    refetch: refetchSupplier,
+    isPartialListFallback: supplierPartialCache,
+  } = useSupplier(supplierId, {
     enabled: Boolean(token) && Number.isFinite(supplierId) && supplierId > 0,
   });
 
   const [sheetMode, setSheetMode] = useState<"purchase" | "payment_out" | null>(null);
+  const [pdfBusyTxId, setPdfBusyTxId] = useState<number | null>(null);
 
   const requirePremium = () => {
     const status = premiumRecording.data;
-    if (premiumRecording.isLoading) return false;
+    if (premiumBootstrapBlocks) return false;
     if (status?.requiresPremium === true && !status.entitled) {
       router.push("/paywall");
       return false;
@@ -63,6 +76,28 @@ export default function SupplierDetailScreen() {
     if (!requirePremium()) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setSheetMode(mode);
+  };
+
+  const openSupplierEntryPdf = async (tx: SupplierLedgerTransactionApi) => {
+    if (Platform.OS === "web") {
+      Alert.alert(t("error"), t("customer_pdf_web_unavailable"));
+      return;
+    }
+    if (!supplier) return;
+    if (!requirePremium()) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setPdfBusyTxId(tx.id);
+    try {
+      if (tx.type === "purchase") {
+        await shareSupplierPurchasePdf(supplierId, tx.id, { whatsappPhone: supplier.phone });
+      } else {
+        await shareSupplierPaymentOutPdf(supplierId, tx.id, { whatsappPhone: supplier.phone });
+      }
+    } catch (e: unknown) {
+      Alert.alert(t("error"), e instanceof Error ? e.message : String(e));
+    } finally {
+      setPdfBusyTxId(null);
+    }
   };
 
   if (!token) {
@@ -87,7 +122,7 @@ export default function SupplierDetailScreen() {
     );
   }
 
-  if (sq.isLoading) {
+  if (supplierLoading) {
     return (
       <View style={styles.flex}>
         <MeshBackdrop isDark={isDark} />
@@ -98,17 +133,16 @@ export default function SupplierDetailScreen() {
     );
   }
 
-  const supplier = sq.data;
-  if (sq.error || !supplier) {
+  if (!supplier) {
     return (
       <View style={styles.flex}>
         <MeshBackdrop isDark={isDark} />
         <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
           <View style={{ padding: 20 }}>
             <Text style={{ color: BakimateColors.danger, fontWeight: "700" }}>
-              {String(sq.error ?? t("error"))}
+              {supplierError != null ? apiErrorMessage(supplierError) : t("error")}
             </Text>
-            <Pressable onPress={() => void sq.refetch()} style={{ marginTop: 16 }}>
+            <Pressable onPress={() => void refetchSupplier()} style={{ marginTop: 16 }}>
               <Text style={{ color: BakimateColors.accentTeal, fontWeight: "800" }}>{t("retry")}</Text>
             </Pressable>
           </View>
@@ -141,6 +175,21 @@ export default function SupplierDetailScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {supplierPartialCache ? (
+            <View
+              style={[
+                styles.cacheHintPill,
+                {
+                  borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.12)",
+                  backgroundColor: isDark ? "rgba(15,23,42,0.55)" : "rgba(255,255,255,0.92)",
+                },
+              ]}
+            >
+              <Ionicons name="cloud-offline-outline" size={16} color={BakimateColors.accentTeal} />
+              <Text style={[styles.cacheHintText, { color: muted }]}>{t("supplier_partial_cache_hint")}</Text>
+            </View>
+          ) : null}
+
           <View style={styles.heroWrap}>
             <PersonAvatar name={supplier.name} size="lg" kind="supplier" />
 
@@ -182,7 +231,7 @@ export default function SupplierDetailScreen() {
               label={t("supplier_new_purchase")}
               accessibilityLabel={t("supplier_new_purchase")}
               style={styles.actionBtn}
-              disabled={Platform.OS !== "web" && premiumRecording.isLoading}
+              disabled={premiumBootstrapBlocks}
             />
             <BigActionButton
               onPress={() => openSheet("payment_out")}
@@ -192,7 +241,7 @@ export default function SupplierDetailScreen() {
               label={t("supplier_paid_them")}
               accessibilityLabel={t("supplier_paid_them")}
               style={styles.actionBtn}
-              disabled={Platform.OS !== "web" && premiumRecording.isLoading}
+              disabled={premiumBootstrapBlocks}
             />
           </View>
 
@@ -237,10 +286,44 @@ export default function SupplierDetailScreen() {
                       ) : null}
                     </View>
 
-                    <Text style={[styles.txAmt, { color: accent }]}>
-                      {isPurchase ? "+" : "−"}
-                      {formatMoneyMinor(tx.amount_sen, currency, i18n.language)}
-                    </Text>
+                    <View style={styles.txTrailingCol}>
+                      <Text style={[styles.txAmt, { color: accent }]}>
+                        {isPurchase ? "+" : "−"}
+                        {formatMoneyMinor(tx.amount_sen, currency, i18n.language)}
+                      </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={t("customer_tx_pdf_a11y")}
+                        hitSlop={8}
+                        disabled={pdfBusyTxId !== null}
+                        onPress={() => void openSupplierEntryPdf(tx)}
+                        style={({ pressed }) => [
+                          styles.txPdfPill,
+                          {
+                            borderColor: BakimateColors.accentTeal,
+                            backgroundColor: isDark
+                              ? "rgba(46, 196, 182, 0.12)"
+                              : "rgba(46, 196, 182, 0.1)",
+                            opacity: pdfBusyTxId === tx.id ? 1 : pressed ? 0.82 : 1,
+                          },
+                        ]}
+                      >
+                        {pdfBusyTxId === tx.id ? (
+                          <ActivityIndicator size="small" color={BakimateColors.accentTeal} />
+                        ) : (
+                          <>
+                            <Ionicons
+                              name="document-text-outline"
+                              size={18}
+                              color={BakimateColors.accentTeal}
+                            />
+                            <Text style={[styles.txPdfPillText, { color: BakimateColors.accentTeal }]}>
+                              {t("customer_tx_pdf_btn")}
+                            </Text>
+                          </>
+                        )}
+                      </Pressable>
+                    </View>
                   </View>
                 );
               })}
@@ -256,7 +339,7 @@ export default function SupplierDetailScreen() {
         currency={currency}
         isDark={isDark}
         onClose={() => setSheetMode(null)}
-        onSaved={() => void sq.refetch()}
+        onSaved={() => void refetchSupplier()}
       />
 
       {sheetMode ? null : (
@@ -284,6 +367,18 @@ const styles = StyleSheet.create({
   backHit: { padding: 6 },
 
   scrollPad: { paddingHorizontal: 20, paddingBottom: 60, flexGrow: 1 },
+
+  cacheHintPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  cacheHintText: { flex: 1, fontSize: 13, fontWeight: "600", lineHeight: 18 },
 
   heroWrap: { alignItems: "center", paddingTop: 4, paddingBottom: 16 },
   heroName: { marginTop: 14, fontSize: 24, fontWeight: "900", textAlign: "center", letterSpacing: -0.4 },
@@ -341,6 +436,17 @@ const styles = StyleSheet.create({
   txNote: { marginTop: 4, fontSize: 12, fontWeight: "600" },
   txDate: { marginTop: 4, fontSize: 11, fontWeight: "700" },
   txAmt: { fontWeight: "900", fontSize: 15 },
+  txTrailingCol: { alignItems: "flex-end", gap: 6 },
+  txPdfPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  txPdfPillText: { fontWeight: "900", fontSize: 12 },
 
   bottomFade: { position: "absolute", left: 0, right: 0, bottom: 0, height: 40 },
 });

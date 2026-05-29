@@ -7,6 +7,12 @@ import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import type { Supplier } from "@/lib/api-types";
 import { useRecordSupplierLedger } from "@/lib/hooks/useSuppliers";
+import { shareSupplierPaymentOutPdf, shareSupplierPurchasePdf } from "@/lib/pdf-download";
+import { profileToReceiptBlurb, resolveShopProfile } from "@/lib/shop-profile";
+import { buildSupplierPaymentOutWhatsAppMessage } from "@/lib/supplier-share-messages";
+import { openWhatsAppText } from "@/lib/whatsapp";
+import { normalizePhoneForWaMe } from "@/lib/phone-wa-me";
+import { useSessionStore } from "@/stores/session-store";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useState } from "react";
@@ -14,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -88,13 +95,81 @@ export function RecordSupplierSheet({
         note: note.trim() || undefined,
       },
       {
-        onSuccess: () => {
+        onSuccess: (saved) => {
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
           setSuccessOpen(true);
           onSaved();
+
+          const tid = Number(saved?.id ?? 0);
+          const afterBalanceSen =
+            mode === "purchase" ? supplier.balance_sen + valueSen : supplier.balance_sen - valueSen;
+
           setTimeout(() => {
             setSuccessOpen(false);
             handleClose();
+
+            if (mode === "purchase" && Number.isFinite(tid) && tid > 0) {
+              Alert.alert(t("supplier_purchase_saved_title"), t("supplier_purchase_saved_body"), [
+                { text: t("not_now"), style: "cancel" },
+                {
+                  text: t("share_pdf"),
+                  onPress: () => {
+                    if (Platform.OS === "web") {
+                      Alert.alert(t("error"), t("customer_pdf_web_unavailable"));
+                      return;
+                    }
+                    void shareSupplierPurchasePdf(supplier.id, tid, { whatsappPhone: supplier.phone }).catch((err) =>
+                      Alert.alert(t("error"), err instanceof Error ? err.message : String(err)),
+                    );
+                  },
+                },
+              ]);
+              return;
+            }
+
+            if (mode === "payment_out" && Number.isFinite(tid) && tid > 0) {
+              const sessionState = useSessionStore.getState();
+              const shopBlurb = profileToReceiptBlurb(
+                resolveShopProfile(sessionState.shopProfiles ?? {}, sessionState.user?.id),
+              );
+              const msg = buildSupplierPaymentOutWhatsAppMessage({
+                supplier: { name: supplier.name },
+                paidSen: valueSen,
+                remainingPayableSen: afterBalanceSen,
+                shop: shopBlurb,
+              });
+
+              const buttons: {
+                text: string;
+                style?: "cancel" | "destructive" | "default";
+                onPress?: () => void;
+              }[] = [{ text: t("done"), style: "cancel" }];
+              buttons.unshift({
+                text: t("share_pdf"),
+                onPress: () => {
+                  if (Platform.OS === "web") {
+                    Alert.alert(t("error"), t("customer_pdf_web_unavailable"));
+                    return;
+                  }
+                  void shareSupplierPaymentOutPdf(supplier.id, tid, { whatsappPhone: supplier.phone }).catch((err) =>
+                    Alert.alert(t("error"), err instanceof Error ? err.message : String(err)),
+                  );
+                },
+              });
+              buttons.unshift({
+                text: t("share_whatsapp"),
+                onPress: () => {
+                  if (normalizePhoneForWaMe(supplier.phone) === null) {
+                    Alert.alert(t("error"), t("contact_phone_required_whatsapp"));
+                    return;
+                  }
+                  void openWhatsAppText(msg, supplier.phone).catch(() => {
+                    Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
+                  });
+                },
+              });
+              Alert.alert(t("payment_saved_title"), t("supplier_payment_saved_body"), buttons);
+            }
           }, 900);
         },
         onError: (e: unknown) =>

@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 16.0.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -14,11 +14,16 @@
         "simulator": true
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://bakimate.habimate.com/api",
+        "EXPO_PUBLIC_API_URL": "https://api.bakimate.com/api",
+        "EXPO_PUBLIC_WEBSITE_URL": "https://bakimate.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "1063670134158-ol4f2247tshoccsa07ubssj1ere5umtk.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "1063670134158-i6408tmq4ugjl0nlu304a0pjf0ri55cl.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_jainIXllpjspAQTsakwfeQOXTUM",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_QUqmeWhcAYPPbfzgzhRQyRwOPrz",
+        "EXPO_PUBLIC_REVENUECAT_PREMIUM_ENTITLEMENT_ID": "entl4bde4334f6",
+        "EXPO_PUBLIC_REVENUECAT_OFFERING_ID": "bakimate_pro"
       }
     },
     "preview": {
@@ -27,11 +32,16 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://bakimate.habimate.com/api",
+        "EXPO_PUBLIC_API_URL": "https://api.bakimate.com/api",
+        "EXPO_PUBLIC_WEBSITE_URL": "https://bakimate.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "1063670134158-ol4f2247tshoccsa07ubssj1ere5umtk.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "1063670134158-i6408tmq4ugjl0nlu304a0pjf0ri55cl.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_jainIXllpjspAQTsakwfeQOXTUM",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_QUqmeWhcAYPPbfzgzhRQyRwOPrz",
+        "EXPO_PUBLIC_REVENUECAT_PREMIUM_ENTITLEMENT_ID": "entl4bde4334f6",
+        "EXPO_PUBLIC_REVENUECAT_OFFERING_ID": "bakimate_pro"
       }
     },
     "production": {
@@ -41,15 +51,21 @@
       },
       "ios": {},
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://bakimate.habimate.com/api",
+        "EXPO_PUBLIC_API_URL": "https://api.bakimate.com/api",
+        "EXPO_PUBLIC_WEBSITE_URL": "https://bakimate.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "1063670134158-ol4f2247tshoccsa07ubssj1ere5umtk.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "1063670134158-i6408tmq4ugjl0nlu304a0pjf0ri55cl.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID": "1063670134158-ik7cvv5f474cl06vevti8io5aql2ushe.apps.googleusercontent.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_jainIXllpjspAQTsakwfeQOXTUM",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_QUqmeWhcAYPPbfzgzhRQyRwOPrz",
+        "EXPO_PUBLIC_REVENUECAT_PREMIUM_ENTITLEMENT_ID": "entl4bde4334f6",
+        "EXPO_PUBLIC_REVENUECAT_OFFERING_ID": "bakimate_pro"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {},
+    "preview": {}
   }
 }

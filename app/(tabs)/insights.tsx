@@ -1,7 +1,9 @@
+import { GlassSurface } from "@/components/ui/glass-surface";
 import { MeshBackdrop } from "@/components/ui/mesh-backdrop";
 import { MoneyDisplay } from "@/components/ui/money-display";
 import { PersonAvatar } from "@/components/ui/person-avatar";
 import { PersonRow } from "@/components/ui/person-row";
+import { ScreenHeroHeader } from "@/components/ui/screen-hero-header";
 import { SignInHero } from "@/components/ui/sign-in-hero";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
@@ -11,6 +13,7 @@ import { useInsights } from "@/lib/hooks/useInsights";
 import { usePremiumRecordingAccess } from "@/lib/hooks/usePremiumRecordingAccess";
 import { useShopCurrency } from "@/lib/hooks/useShopCurrency";
 import { formatMoneyMinor } from "@/lib/money";
+import { apiErrorMessage } from "@/lib/api";
 import { buildWeeklyNudgeWhatsAppMessage } from "@/lib/nudge-whatsapp";
 import { shareMonthlyStatementPdf } from "@/lib/pdf-download";
 import { iconForQuickItem } from "@/lib/quick-item-icons";
@@ -19,6 +22,7 @@ import { profileToReceiptBlurb, resolveShopProfile } from "@/lib/shop-profile";
 import { openWhatsAppText } from "@/lib/whatsapp";
 import { useSessionStore } from "@/stores/session-store";
 import { Ionicons } from "@expo/vector-icons";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { useMemo, useState } from "react";
@@ -35,8 +39,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-const TAB_BAR_OVERLAY_PAD = Platform.OS === "ios" ? 108 : 96;
 
 function CashflowBars({
   days,
@@ -86,6 +88,7 @@ function CashflowBars({
 
 export default function InsightsScreen() {
   const { t, i18n } = useTranslation();
+  const tabBarHeight = useBottomTabBarHeight();
   const shopCurrency = useShopCurrency();
   const rawScheme = useColorScheme();
   const theme = rawScheme === "dark" ? "dark" : "light";
@@ -160,80 +163,82 @@ export default function InsightsScreen() {
               />
             ) : undefined
           }
-          contentContainerStyle={[styles.scroll, { paddingBottom: TAB_BAR_OVERLAY_PAD }]}
+          contentContainerStyle={[styles.scroll, { paddingBottom: tabBarHeight + 24 }]}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={[styles.title, { color: headline }]}>{t("insights_title")}</Text>
+          <ScreenHeroHeader
+            eyebrow={t("insights_this_week_title")}
+            title={t("insights_title")}
+            subtitle={t("insights_subtitle")}
+            headlineColor={headline}
+            mutedColor={muted}
+            marginBottom={6}
+          />
 
           {!token ? (
             <SignInHero isDark={isDark} />
           ) : iq.isLoading ? (
             <ActivityIndicator style={{ marginTop: 36 }} color={BakimateColors.accentTeal} />
-          ) : iq.error ? (
+          ) : iq.error && !iq.data ? (
             <Text style={{ color: BakimateColors.danger, marginTop: 14, fontWeight: "700" }}>
-              {(iq.error as Error).message ?? String(iq.error)}
+              {apiErrorMessage(iq.error)}
             </Text>
           ) : iq.data ? (
             <>
-              {/* Pictogram summary: two big tiles */}
-              <View style={styles.summaryRow}>
-                <View
-                  style={[
-                    styles.summaryTile,
-                    {
-                      backgroundColor: isDark
-                        ? "rgba(34, 197, 94, 0.18)"
-                        : "rgba(34, 197, 94, 0.14)",
-                      borderColor: BakimateColors.success,
-                    },
-                  ]}
-                >
-                  <Ionicons name="cash" size={32} color={BakimateColors.success} />
-                  <MoneyDisplay
-                    sen={weekTotals.collected}
-                    currencyCode={shopCurrency}
-                    size="large"
-                    tone="paid"
-                    align="center"
-                  />
-                  <Text style={[styles.summaryCaption, { color: BakimateColors.success }]}>
-                    {t("insights_legend_collected")}
-                  </Text>
-                </View>
+              <GlassSurface isDark={isDark} style={styles.summaryGlass} contentStyle={styles.summaryGlassInner}>
+                <View style={styles.summaryRow}>
+                  <View
+                    style={[
+                      styles.summaryTile,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(34, 197, 94, 0.18)"
+                          : "rgba(34, 197, 94, 0.14)",
+                        borderColor: BakimateColors.success,
+                      },
+                      styles.summaryTileLeading,
+                    ]}
+                  >
+                    <Ionicons name="cash" size={32} color={BakimateColors.success} />
+                    <MoneyDisplay
+                      sen={weekTotals.collected}
+                      currencyCode={shopCurrency}
+                      size="large"
+                      tone="paid"
+                      align="center"
+                    />
+                    <Text style={[styles.summaryCaption, { color: BakimateColors.success }]}>
+                      {t("insights_legend_collected")}
+                    </Text>
+                  </View>
 
-                <View
-                  style={[
-                    styles.summaryTile,
-                    {
-                      backgroundColor: isDark
-                        ? "rgba(239, 68, 68, 0.18)"
-                        : "rgba(239, 68, 68, 0.12)",
-                      borderColor: BakimateColors.danger,
-                    },
-                  ]}
-                >
-                  <Ionicons name="arrow-up" size={32} color={BakimateColors.danger} />
-                  <MoneyDisplay
-                    sen={weekTotals.credit}
-                    currencyCode={shopCurrency}
-                    size="large"
-                    tone="debt"
-                    align="center"
-                  />
-                  <Text style={[styles.summaryCaption, { color: BakimateColors.danger }]}>
-                    {t("insights_legend_credit")}
-                  </Text>
+                  <View
+                    style={[
+                      styles.summaryTile,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(239, 68, 68, 0.18)"
+                          : "rgba(239, 68, 68, 0.12)",
+                        borderColor: BakimateColors.danger,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="arrow-up" size={32} color={BakimateColors.danger} />
+                    <MoneyDisplay
+                      sen={weekTotals.credit}
+                      currencyCode={shopCurrency}
+                      size="large"
+                      tone="debt"
+                      align="center"
+                    />
+                    <Text style={[styles.summaryCaption, { color: BakimateColors.danger }]}>
+                      {t("insights_legend_credit")}
+                    </Text>
+                  </View>
                 </View>
-              </View>
+              </GlassSurface>
 
-              {/* Chart */}
-              <View
-                style={[
-                  styles.card,
-                  styles.cardPad,
-                  { backgroundColor: isDark ? "rgba(15, 23, 42, 0.55)" : "rgba(255, 255, 255, 0.94)" },
-                ]}
-              >
+              <GlassSurface isDark={isDark} style={styles.chartGlass} contentStyle={styles.cardPad}>
                 <View style={styles.legendRow}>
                   <View style={styles.legendItem}>
                     <View style={[styles.legendSwatch, { backgroundColor: BakimateColors.success }]} />
@@ -249,7 +254,7 @@ export default function InsightsScreen() {
                   labelColor={muted}
                   language={i18n.language}
                 />
-              </View>
+              </GlassSurface>
 
               {/* Top debtors */}
               <View style={styles.sectionTitleRow}>
@@ -492,18 +497,20 @@ export default function InsightsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   safe: { flex: 1, backgroundColor: "transparent", paddingHorizontal: 18 },
-  scroll: { paddingTop: 6, gap: 14 },
-  title: { fontSize: 32, fontWeight: "900", letterSpacing: -0.6, marginBottom: 8 },
+  scroll: { paddingTop: 8 },
 
-  card: { borderRadius: 22, marginBottom: 4 },
+  summaryGlass: { marginTop: 8, marginBottom: 18 },
+  summaryGlassInner: { padding: 14 },
+  summaryRow: { flexDirection: "row", alignItems: "stretch" },
+  summaryTileLeading: { marginRight: 12 },
   cardPad: { padding: 18 },
-
-  summaryRow: { flexDirection: "row", gap: 12, marginBottom: 4 },
+  chartGlass: { marginBottom: 20 },
   summaryTile: {
     flex: 1,
-    borderRadius: 22,
-    paddingVertical: 18,
-    paddingHorizontal: 14,
+    minWidth: 0,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 10,
     alignItems: "center",
     gap: 6,
     borderWidth: 1.5,
@@ -543,8 +550,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginTop: 10,
-    marginBottom: 6,
+    marginTop: 4,
+    marginBottom: 10,
   },
   sectionTitle: { fontSize: 18, fontWeight: "900", letterSpacing: -0.3 },
   emptyInline: { fontSize: 13, fontWeight: "700", marginBottom: 6, paddingHorizontal: 4 },

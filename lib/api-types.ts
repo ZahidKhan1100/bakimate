@@ -76,6 +76,16 @@ export type Supplier = {
   updated_at?: string;
 };
 
+/** Row returned from `POST /supplier-transactions`. */
+export type SupplierTransactionCreated = {
+  id: number;
+  shop_id: number;
+  supplier_id: number;
+  amount_sen: number;
+  type: "purchase" | "payment_out";
+  note: string | null;
+};
+
 export type SupplierLedgerTransactionApi = {
   id: number;
   amount_sen: number;
@@ -92,9 +102,25 @@ export type AuthUser = {
   id: number;
   name: string;
   email: string;
+  /** ISO 8601 when the server has confirmed the address (null until verified). */
+  email_verified_at?: string | null;
 };
 
-/** Shop row from `GET /shop` / `PATCH /shop` / login payload. */
+export type AuthResponse = {
+  /** Omitted or null until the account is allowed to use the API (e.g. after email verification). */
+  token?: string | null;
+  user: AuthUser;
+  /** First shop for this account (BakiMate single-shop model). */
+  shop?: ShopApi | null;
+  /** True right after email/password registration before the inbox link is used. */
+  verification_required?: boolean;
+  message?: string;
+};
+
+export type CheckEmailVerifiedResponse =
+  | { email_verified: false }
+  | AuthResponse;
+
 export type ShopApi = {
   id: number;
   name: string;
@@ -112,13 +138,6 @@ export type ShopApi = {
   subscription_expires_at?: string | null;
   /** Public URL for stored DuitNow QR image (`null` if not uploaded). */
   duitnow_qr_url?: string | null;
-};
-
-export type AuthResponse = {
-  token: string;
-  user: AuthUser;
-  /** First shop for this account (BakiMate single-shop model). */
-  shop?: ShopApi | null;
 };
 
 /** Local shop form fields (cached per user + synced with API). */

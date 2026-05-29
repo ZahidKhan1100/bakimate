@@ -21,7 +21,21 @@ function readExtraGoogle(): GoogleOAuthClientIds {
   };
 }
 
-/** Same pattern as HabiMate: Web + native clients; optional expo client (= Web ID for Expo Go proxy). */
+/**
+ * HTTPS bridge for setups where Google's **Web** OAuth redirect UI only accepts https URIs — see Laravel
+ * `GET /auth/google/expo-bridge`. When unset, native Android uses **`{applicationId}:/oauthredirect`**
+ * (same as houseexpenses-new): configure the **Android** OAuth client with package name, signing SHA‑1,
+ * and **Custom URI scheme** enabled in Google Cloud.
+ */
+function readGoogleHttpsBridgeRedirectUri(): string | undefined {
+  const fromEnv = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_HTTPS_REDIRECT?.trim() ?? "";
+  if (fromEnv.startsWith("https://")) return fromEnv;
+  const extra = Constants.expoConfig?.extra as Record<string, string | undefined> | undefined;
+  const fromExtra = extra?.googleOauthHttpsRedirect?.trim() ?? "";
+  if (fromExtra.startsWith("https://")) return fromExtra;
+  return undefined;
+}
+
 export function getGoogleOAuthClientIds(): GoogleOAuthClientIds {
   const fromExtra = readExtraGoogle();
   return {
@@ -46,6 +60,10 @@ export function shouldUseGoogleAuthProxy(): boolean {
  * Set `EXPO_PUBLIC_EXPO_PROXY_PATH=@YOUR_EXPO_USER/bakimate` when `app.json` has no owner/slug publishing context.
  *
  * Prefer dev builds (`expo run:*` / `--dev-client`) instead of relying on proxy long term.
+ *
+ * **Android rebuild:** Redirect uses `${applicationId}:/oauthredirect`; `app.config.ts` merges that package name into
+ * `scheme` plus an **`intent-filter`** (`pathPrefix: /oauthredirect`) so Chrome Custom Tabs can hand off to the app.
+ * After changing OAuth config run `expo prebuild --clean --platform android` (or another native rebuild).
  */
 export function getAuthExpoProxyRedirectUri(): string {
   const explicit = process.env.EXPO_PUBLIC_EXPO_PROXY_PATH?.trim();
@@ -108,6 +126,11 @@ export function resolveGoogleOAuthRedirectUri(): string {
     return getAuthExpoProxyRedirectUri();
   }
 
+  const bridge = readGoogleHttpsBridgeRedirectUri();
+  if (bridge) {
+    return bridge;
+  }
+
   const ids = getGoogleOAuthClientIds();
 
   if (Platform.OS === "ios") {
@@ -120,12 +143,19 @@ export function resolveGoogleOAuthRedirectUri(): string {
     return getGoogleIosReversedOauthRedirectUri(cid);
   }
 
+  /**
+   * Android (native): `{packageName}:/oauthredirect` — NOT `bakimate://`.
+   * Google Cloud → Credentials → Android OAuth client → Package `com.ihabimate.bakimate`,
+   * SHA‑1 from the **keystore that signed this APK** (EAS credentials or debug.keystore),
+   * and enable **Custom URI scheme**.
+   */
   const pkg =
     Application.applicationId?.trim() && Application.applicationId.trim() !== ""
       ? Application.applicationId.trim()
       : "com.ihabimate.bakimate";
-
-  return `${pkg}:/oauthredirect`;
+  return AuthSession.makeRedirectUri({
+    native: `${pkg}:/oauthredirect`,
+  });
 }
 
 export function buildGoogleIdTokenAuthRequestPartialConfig(): Partial<GoogleAuthRequestConfig> {

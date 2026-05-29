@@ -1,12 +1,22 @@
 import axios from "axios";
 import Constants from "expo-constants";
 
+import { apiErrorMessage } from "@/lib/api-error-message";
 import { useSessionStore } from "@/stores/session-store";
 
-const baseURL =
+export { apiErrorMessage } from "@/lib/api-error-message";
+
+/** Laravel routes are prefixed with `/api`; accept base host only to avoid accidental 404 / HTML errors. */
+function withApiSuffix(url: string): string {
+  const u = url.trim().replace(/\/+$/, "");
+  return u.endsWith("/api") ? u : `${u}/api`;
+}
+
+const baseURL = withApiSuffix(
   process.env.EXPO_PUBLIC_API_URL ??
-  (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ??
-  "http://127.0.0.1:8000/api";
+    (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ??
+    "http://127.0.0.1:8000",
+);
 
 /** Axios `baseURL` (includes `/api`). */
 export const apiBaseUrl = baseURL;

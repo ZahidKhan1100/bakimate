@@ -1,0 +1,147 @@
+{
+  "identifier" : "BACB7E10",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "BMA1C9E2",
+      "localizations" : [
+
+      ],
+      "name" : "BakiMate Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "A184729A",
+          "introductoryOffer" : {
+            "internalID" : "B1847291",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "BakiMate Pro subscription — billed every month (StoreKit Testing). Match App Store Connect & RevenueCat product id.",
+              "displayName" : "BakiMate Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.ihabimate.bakimate.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pro Monthly",
+          "subscriptionGroupID" : "BMA1C9E2",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "11.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "A284729B",
+          "introductoryOffer" : {
+            "internalID" : "B2847291",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "BakiMate Pro — billed every 3 months (StoreKit Testing).",
+              "displayName" : "BakiMate Pro 3 Months",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.ihabimate.bakimate.pro.3months",
+          "recurringSubscriptionPeriod" : "P3M",
+          "referenceName" : "Pro 3 Months",
+          "subscriptionGroupID" : "BMA1C9E2",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "21.99",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "A384729C",
+          "introductoryOffer" : {
+            "internalID" : "B3847291",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "BakiMate Pro — billed every 6 months (StoreKit Testing).",
+              "displayName" : "BakiMate Pro 6 Months",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.ihabimate.bakimate.pro.6months",
+          "recurringSubscriptionPeriod" : "P6M",
+          "referenceName" : "Pro 6 Months",
+          "subscriptionGroupID" : "BMA1C9E2",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "34.99",
+          "familyShareable" : false,
+          "groupNumber" : 4,
+          "internalID" : "A484729D",
+          "introductoryOffer" : {
+            "internalID" : "B4847291",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "BakiMate Pro — billed yearly (StoreKit Testing).",
+              "displayName" : "BakiMate Pro Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.ihabimate.bakimate.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Pro Yearly",
+          "subscriptionGroupID" : "BMA1C9E2",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 2,
+    "minor" : 0
+  }
+}

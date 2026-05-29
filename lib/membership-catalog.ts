@@ -1,7 +1,7 @@
 import type { PurchasesPackage } from "react-native-purchases";
 
-/** Free trial length — configure matching intro offer / free trial in App Store Connect + RevenueCat. */
-export const MEMBERSHIP_TRIAL_DAYS = 7;
+/** Free trial length — configure matching intro offer / free trial in App Store Connect + Play Console + RevenueCat. */
+export const MEMBERSHIP_TRIAL_DAYS = 30;
 
 /**
  * Target US pricing (merchant reference). Actual paid amount is whatever you set in
@@ -29,11 +29,36 @@ const PACKAGE_RANK: Partial<Record<string, number>> = {
 
 export function sortMembershipPackages(pkgs: PurchasesPackage[]): PurchasesPackage[] {
   return [...pkgs].sort((a, b) => {
-    const ka = PACKAGE_RANK[String(a.packageType).toUpperCase()] ?? 99;
-    const kb = PACKAGE_RANK[String(b.packageType).toUpperCase()] ?? 99;
+    const ra = resolvedMembershipPackageTier(a);
+    const rb = resolvedMembershipPackageTier(b);
+    const ka =
+      ra != null
+        ? (PACKAGE_RANK[membershipTierToPackageTypeKey(ra)] ?? 99)
+        : (PACKAGE_RANK[String(a.packageType).toUpperCase()] ?? 99);
+    const kb =
+      rb != null
+        ? (PACKAGE_RANK[membershipTierToPackageTypeKey(rb)] ?? 99)
+        : (PACKAGE_RANK[String(b.packageType).toUpperCase()] ?? 99);
 
     return ka - kb;
   });
+}
+
+function membershipTierToPackageTypeKey(
+  tier: keyof typeof MEMBERSHIP_USD_PRICE_TARGETS,
+): keyof typeof PACKAGE_RANK {
+  switch (tier) {
+    case "monthly":
+      return "MONTHLY";
+    case "threeMonths":
+      return "THREE_MONTH";
+    case "sixMonths":
+      return "SIX_MONTH";
+    case "annual":
+      return "ANNUAL";
+    default:
+      return "MONTHLY";
+  }
 }
 
 export function membershipPackageTier(pkg: PurchasesPackage): keyof typeof MEMBERSHIP_USD_PRICE_TARGETS | null {
@@ -52,6 +77,48 @@ export function membershipPackageTier(pkg: PurchasesPackage): keyof typeof MEMBE
   }
 }
 
+/**
+ * When packages are attached in RevenueCat with custom identifiers, `packageType` is often
+ * CUSTOM/UNKNOWN even though the Store product is a normal subscription. Map known product
+ * / package ids so the paywall still gets tier labels and sort order.
+ */
+function inferMembershipTierFromIdentifiers(pkg: PurchasesPackage): keyof typeof MEMBERSHIP_USD_PRICE_TARGETS | null {
+  const parts = [pkg.product.identifier, pkg.identifier]
+    .filter((s) => typeof s === "string" && s.trim() !== "")
+    .map((s) => s.toLowerCase());
+  const hay = parts.join(" ");
+
+  if (
+    hay.includes("yearly") ||
+    hay.includes("annual") ||
+    hay.endsWith(".year") ||
+    /(^|\.)1y($|\.)/.test(hay)
+  ) {
+    return "annual";
+  }
+  if (hay.includes("6month") || hay.includes("six_month") || hay.includes("sixmonth")) {
+    return "sixMonths";
+  }
+  if (hay.includes("3month") || hay.includes("three_month") || hay.includes("threemonth")) {
+    return "threeMonths";
+  }
+  if (hay.includes("monthly") || hay.includes(".month") || /(^|\.)1m($|\.)/.test(hay)) {
+    return "monthly";
+  }
+
+  return null;
+}
+
+/** Resolved tier from RevenueCat package type and/or Store product / package identifiers. */
+export function resolvedMembershipPackageTier(
+  pkg: PurchasesPackage,
+): keyof typeof MEMBERSHIP_USD_PRICE_TARGETS | null {
+  return membershipPackageTier(pkg) ?? inferMembershipTierFromIdentifiers(pkg);
+}
+
 export function isAnnualMembershipPackage(pkg: PurchasesPackage): boolean {
-  return String(pkg.packageType).toUpperCase() === "ANNUAL";
+  if (String(pkg.packageType).toUpperCase() === "ANNUAL") {
+    return true;
+  }
+  return resolvedMembershipPackageTier(pkg) === "annual";
 }

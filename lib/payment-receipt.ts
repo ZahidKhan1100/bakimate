@@ -57,6 +57,49 @@ export function buildPaymentReceiptWhatsAppMessage(ctx: PaymentReceiptContext): 
   return lines.join("\n");
 }
 
+export type CreditRecordedWhatsAppContext = {
+  customer: Pick<Customer, "name">;
+  creditSen: number;
+  newBalanceSen: number;
+  shop?: ReceiptShopBlurb | null;
+};
+
+/** Prefilled message after recording new credit (balance / shop blurb mirror payment receipt). */
+export function buildCreditRecordedWhatsAppMessage(ctx: CreditRecordedWhatsAppContext): string {
+  const lines: string[] = [i18n.t("wa_credit_title")];
+
+  if (ctx.shop?.shopName?.trim()) {
+    lines.push(i18n.t("wa_receipt_shop", { name: ctx.shop.shopName.trim() }));
+  }
+  if (ctx.shop?.shopLocation?.trim()) {
+    lines.push(i18n.t("wa_receipt_location", { name: ctx.shop.shopLocation.trim() }));
+  }
+  if (ctx.shop?.shopContact?.trim()) {
+    lines.push(i18n.t("wa_receipt_contact", { name: ctx.shop.shopContact.trim() }));
+  }
+  if (ctx.shop?.paymentInstructions?.trim()) {
+    lines.push(i18n.t("wa_receipt_pay_via", { details: ctx.shop.paymentInstructions.trim() }));
+  }
+  if (ctx.shop?.hasDuitNowQr) {
+    lines.push(i18n.t("wa_receipt_qr_hint"));
+  }
+
+  lines.push(
+    "",
+    i18n.t("wa_receipt_customer", { name: ctx.customer.name }),
+    i18n.t("wa_credit_given_today", {
+      amount: formatMoneyMinor(ctx.creditSen, ctx.shop?.currencyCode),
+    }),
+    i18n.t("wa_credit_balance_owing", {
+      amount: formatMoneyMinor(ctx.newBalanceSen, ctx.shop?.currencyCode),
+    }),
+    "",
+    i18n.t("wa_credit_thanks"),
+  );
+
+  return lines.join("\n");
+}
+
 export function buildInstallmentReminderMessage(
   customerName: string,
   balanceSen: number,

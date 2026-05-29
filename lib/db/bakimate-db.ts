@@ -29,6 +29,18 @@ export async function openBakimateDatabase(): Promise<SQLiteDatabase | null> {
         );
         CREATE INDEX IF NOT EXISTS idx_outbox_active_created ON outbox_transactions (created_at)
           WHERE superseded = 0;
+        CREATE TABLE IF NOT EXISTS outbox_customers (
+          id TEXT PRIMARY KEY NOT NULL,
+          payload TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          superseded INTEGER NOT NULL DEFAULT 0,
+          superseded_reason TEXT,
+          superseded_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_outbox_customers_active ON outbox_customers (created_at)
+          WHERE superseded = 0;
       `);
 
       await migrateLegacyAsyncStorageOutbox(db);

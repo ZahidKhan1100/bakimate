@@ -5,29 +5,31 @@ import { MoneyKeypad } from "@/components/money-keypad";
 import { QuickAmountChips } from "@/components/ui/quick-amount-chips";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
-import type { Customer } from "@/lib/api-types";
+import type { Customer, CustomerLedgerTransactionApi } from "@/lib/api-types";
 import { isPremiumRecordingBlockedError } from "@/lib/errors/premium-recording-blocked-error";
 import { formatCalendarDateShort } from "@/lib/format-dates";
 import { useRecordTransaction } from "@/lib/hooks/useRecordTransaction";
-import { buildPaymentReceiptWhatsAppMessage } from "@/lib/payment-receipt";
+import { usePatchCustomerLedgerTransaction } from "@/lib/hooks/useLedgerTransactionMutations";
+import {
+  buildCreditRecordedWhatsAppMessage,
+  buildPaymentReceiptWhatsAppMessage,
+} from "@/lib/payment-receipt";
 import { iconForQuickItem } from "@/lib/quick-item-icons";
-import { scanReceiptFromImageUri } from "@/lib/receipt-scan-api";
 import { shareCreditInvoicePdf, sharePaymentReceiptPdf } from "@/lib/pdf-download";
 import { profileToReceiptBlurb, resolveShopProfile } from "@/lib/shop-profile";
 import type { OutboxTransactionPayload } from "@/lib/transaction-outbox";
 import { useVoiceNoteComposer } from "@/lib/use-voice-note";
 import { openWhatsAppText } from "@/lib/whatsapp";
+import { normalizePhoneForWaMe } from "@/lib/phone-wa-me";
 import { useSessionStore } from "@/stores/session-store";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -51,6 +53,8 @@ type Props = {
   onOpenDuitnowQr: () => void;
   /** Called after a successful save so the parent can refetch. */
   onSaved: () => void;
+  /** When set, the sheet PATCHes this ledger row instead of POSTing a new one. */
+  editingTransaction?: CustomerLedgerTransactionApi | null;
 };
 
 function addDaysLocal(days: number): string {
@@ -65,7 +69,7 @@ function addDaysLocal(days: number): string {
 
 /**
  * Low-literacy record sheet: pictogram title, big live amount, numeric keypad,
- * banknote quick-amount chips, icon-led quick-item chips, large date tiles,
+ * banknote quick-amount chips, icon-led quick-item chips, instalment due-date tiles,
  * and big check/X confirm. The note + voice mic + Qist goal sit behind a
  * "more options" chevron so the default flow is two taps.
  */
@@ -80,11 +84,13 @@ export function RecordTransactionSheet({
   onClose,
   onOpenDuitnowQr,
   onSaved,
+  editingTransaction = null,
 }: Props) {
   const { t, i18n } = useTranslation();
   const headline = Colors[isDark ? "dark" : "light"].text;
   const muted = isDark ? BakimateColors.neutralTextMutedDark : BakimateColors.neutralText;
   const recordMut = useRecordTransaction();
+  const patchMut = usePatchCustomerLedgerTransaction(customer.id);
 
   const [valueSen, setValueSen] = useState(0);
   const [note, setNote] = useState("");
@@ -93,20 +99,7 @@ export function RecordTransactionSheet({
   const [goalAmountRmText, setGoalAmountRmText] = useState("");
   const [goalPayByYmd, setGoalPayByYmd] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
-  const [scanBusy, setScanBusy] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
-
-  const speechLocale = i18n.language.startsWith("ms") ? "ms-MY" : "en-US";
-  const { speechAvailable, listening, toggleListening } = useVoiceNoteComposer({
-    locale: speechLocale,
-    onAppendFinal: (text) => setNote((p) => (p.trim() ? `${p.trim()} ${text}` : text)),
-  });
-
-  if (!mode) return null;
-
-  const isCredit = mode === "credit";
-  const accentColor = isCredit ? BakimateColors.danger : BakimateColors.success;
-  const presets = { d7: addDaysLocal(7), d14: addDaysLocal(14), d30: addDaysLocal(30) };
 
   const resetState = () => {
     setValueSen(0);
@@ -118,61 +111,46 @@ export function RecordTransactionSheet({
     setMoreOpen(false);
   };
 
+  const editingId = editingTransaction?.id ?? 0;
+
+  useEffect(() => {
+    if (!visible) return;
+    if (editingTransaction) {
+      setSuccessOpen(false);
+      setValueSen(editingTransaction.amount_sen);
+      setNote(editingTransaction.note ?? "");
+      setSelectedQuickItem(editingTransaction.item_key?.trim() || null);
+      setNextDue(null);
+      setGoalAmountRmText("");
+      setGoalPayByYmd("");
+      setMoreOpen(
+        Boolean(
+          (editingTransaction.note ?? "").trim() ||
+            (editingTransaction.item_key ?? "").trim(),
+        ),
+      );
+    } else {
+      resetState();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resetBranch uses stable resetState-shaped fields only when opening/closing modes
+  }, [visible, editingId]);
+
+  const speechLocale = i18n.language.startsWith("ms") ? "ms-MY" : "en-US";
+  const { speechAvailable, listening, toggleListening } = useVoiceNoteComposer({
+    locale: speechLocale,
+    onAppendFinal: (text) => setNote((p) => (p.trim() ? `${p.trim()} ${text}` : text)),
+  });
+
+  if (!mode) return null;
+
+  const isCredit = mode === "credit";
+  const isEditing = editingTransaction != null;
+  const accentColor = isCredit ? BakimateColors.danger : BakimateColors.success;
+  const presets = { d7: addDaysLocal(7), d14: addDaysLocal(14), d30: addDaysLocal(30) };
+
   const handleClose = () => {
     resetState();
     onClose();
-  };
-
-  const handleSnapReceipt = async () => {
-    if (Platform.OS === "web") {
-      Alert.alert(t("error"), t("snap_receipt_web_unavailable"));
-      return;
-    }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(t("error"), t("shop_duitnow_qr_permission_denied"));
-      return;
-    }
-    const pic = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: false,
-      quality: 0.82,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-    });
-    if (pic.canceled) return;
-    const uri = pic.assets?.[0]?.uri;
-    if (!uri) return;
-    setScanBusy(true);
-    try {
-      const r = await scanReceiptFromImageUri(uri);
-      if (r.error_code === "gemini_not_configured") {
-        Alert.alert(t("error"), t("receipt_gemini_not_configured"));
-        return;
-      }
-      if (
-        r.error_code === "gemini_request_failed" ||
-        r.error_code === "gemini_parse_failed" ||
-        r.error_code === "gemini_blocked"
-      ) {
-        Alert.alert(t("error"), t("snap_receipt_none"));
-        return;
-      }
-      let filledAmt = false;
-      if (r.suggested_amount_sen != null && r.suggested_amount_sen > 0) {
-        setValueSen(r.suggested_amount_sen);
-        filledAmt = true;
-      }
-      if (r.suggested_date_ymd?.trim()) {
-        setGoalPayByYmd(r.suggested_date_ymd.trim());
-      }
-      Alert.alert(
-        t("snap_receipt_prefilled_toast_title"),
-        filledAmt ? t("snap_receipt_prefilled_body") : t("snap_receipt_none"),
-      );
-    } catch (e: unknown) {
-      Alert.alert(t("error"), e instanceof Error ? e.message : String(e));
-    } finally {
-      setScanBusy(false);
-    }
   };
 
   const handleSave = () => {
@@ -182,6 +160,37 @@ export function RecordTransactionSheet({
     }
 
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+
+    if (editingTransaction) {
+      patchMut.mutate(
+        {
+          transactionId: editingTransaction.id,
+          amount_sen: valueSen,
+          note: note.trim() || null,
+          item_key: isCredit ? selectedQuickItem?.trim() ?? null : null,
+        },
+        {
+          onSuccess: () => {
+            setSuccessOpen(true);
+            onSaved();
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            setTimeout(() => {
+              setSuccessOpen(false);
+              handleClose();
+            }, 820);
+          },
+          onError: (e: unknown) => {
+            if (isPremiumRecordingBlockedError(e)) {
+              handleClose();
+              router.push("/paywall");
+              return;
+            }
+            Alert.alert(t("error"), e instanceof Error ? e.message : String(e));
+          },
+        },
+      );
+      return;
+    }
 
     const payload: OutboxTransactionPayload = {
       customer_id: customer.id,
@@ -220,6 +229,7 @@ export function RecordTransactionSheet({
           const cust = res.remote.customer;
           const payTid = res.remote.transaction ? Number(res.remote.transaction.id) : NaN;
           const sessionState = useSessionStore.getState();
+          const rawPhone = cust.phone ?? customer.phone;
           const msg = buildPaymentReceiptWhatsAppMessage({
             customer: { name: cust.name },
             paidSen: valueSen,
@@ -242,7 +252,7 @@ export function RecordTransactionSheet({
               buttons.unshift({
                 text: t("share_pdf"),
                 onPress: () => {
-                  void sharePaymentReceiptPdf(customer.id, payTid).catch((err) => {
+                  void sharePaymentReceiptPdf(customer.id, payTid, { whatsappPhone: rawPhone }).catch((err) => {
                     Alert.alert(t("error"), err instanceof Error ? err.message : String(err));
                   });
                 },
@@ -251,7 +261,11 @@ export function RecordTransactionSheet({
             buttons.unshift({
               text: t("share_whatsapp"),
               onPress: () => {
-                void openWhatsAppText(msg, cust.phone).catch(() => {
+                if (normalizePhoneForWaMe(rawPhone) === null) {
+                  Alert.alert(t("error"), t("contact_phone_required_whatsapp"));
+                  return;
+                }
+                void openWhatsAppText(msg, rawPhone).catch(() => {
                   Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
                 });
               },
@@ -264,20 +278,46 @@ export function RecordTransactionSheet({
         if (isCredit && res.remote?.transaction) {
           const tid = Number(res.remote.transaction.id);
           if (Number.isFinite(tid)) {
+            const cust = res.remote.customer;
+            const rawPhone = cust.phone ?? customer.phone;
+            const sessionState = useSessionStore.getState();
+            const msg = buildCreditRecordedWhatsAppMessage({
+              customer: { name: cust.name },
+              creditSen: valueSen,
+              newBalanceSen: cust.balance_sen,
+              shop: profileToReceiptBlurb(
+                resolveShopProfile(sessionState.shopProfiles ?? {}, sessionState.user?.id),
+              ),
+            });
             setTimeout(() => {
               setSuccessOpen(false);
               handleClose();
-              Alert.alert(t("credit_invoice_title"), t("credit_invoice_body"), [
-                { text: t("not_now"), style: "cancel" },
-                {
-                  text: t("share_pdf"),
-                  onPress: () => {
-                    void shareCreditInvoicePdf(customer.id, tid).catch((err) => {
-                      Alert.alert(t("error"), err instanceof Error ? err.message : String(err));
-                    });
-                  },
+              const buttons: {
+                text: string;
+                style?: "cancel" | "destructive" | "default";
+                onPress?: () => void;
+              }[] = [{ text: t("done"), style: "cancel" }];
+              buttons.unshift({
+                text: t("share_pdf"),
+                onPress: () => {
+                  void shareCreditInvoicePdf(customer.id, tid, { whatsappPhone: rawPhone }).catch((err) => {
+                    Alert.alert(t("error"), err instanceof Error ? err.message : String(err));
+                  });
                 },
-              ]);
+              });
+              buttons.unshift({
+                text: t("share_whatsapp"),
+                onPress: () => {
+                  if (normalizePhoneForWaMe(rawPhone) === null) {
+                    Alert.alert(t("error"), t("contact_phone_required_whatsapp"));
+                    return;
+                  }
+                  void openWhatsAppText(msg, rawPhone).catch(() => {
+                    Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
+                  });
+                },
+              });
+              Alert.alert(t("credit_invoice_title"), t("credit_invoice_body_whatsapp"), buttons);
             }, 900);
             return;
           }
@@ -333,6 +373,11 @@ export function RecordTransactionSheet({
             <Text style={[styles.headerCaption, { color: muted }]} numberOfLines={1}>
               {customer.name}
             </Text>
+            {isEditing ? (
+              <Text style={[styles.sheetEditHint, { color: muted }]}>
+                {isCredit ? t("ledger_sheet_edit_credit") : t("ledger_sheet_edit_payment")}
+              </Text>
+            ) : null}
           </View>
         </View>
 
@@ -397,7 +442,7 @@ export function RecordTransactionSheet({
         ) : null}
 
         {/* Credit-only: big due-date tiles */}
-        {isCredit ? (
+        {isCredit && !isEditing ? (
           <View style={styles.section}>
             <View style={styles.dueRow}>
               {dueTiles.map(({ days, ymd }) => {
@@ -445,7 +490,7 @@ export function RecordTransactionSheet({
         ) : null}
 
         {/* Payment-only: DuitNow QR shortcut */}
-        {!isCredit ? (
+        {!isCredit && !isEditing ? (
           <Pressable
             onPress={onOpenDuitnowQr}
             style={({ pressed }) => [
@@ -462,33 +507,6 @@ export function RecordTransactionSheet({
             <Ionicons name="qr-code-outline" size={26} color={BakimateColors.accentTeal} />
             <Text style={[styles.qrLinkText, { color: BakimateColors.accentTeal }]}>
               {duitnowQrUrl ? t("duitnow_show_qr") : t("duitnow_qr_missing_title")}
-            </Text>
-          </Pressable>
-        ) : null}
-
-        {/* Receipt scan link (credit only) */}
-        {isCredit ? (
-          <Pressable
-            onPress={() => void handleSnapReceipt()}
-            disabled={scanBusy || recordMut.isPending}
-            style={({ pressed }) => [
-              styles.qrLink,
-              {
-                borderColor: BakimateColors.accentTeal,
-                backgroundColor: isDark
-                  ? "rgba(46, 196, 182, 0.14)"
-                  : "rgba(46, 196, 182, 0.1)",
-                opacity: scanBusy || recordMut.isPending ? 0.55 : pressed ? 0.85 : 1,
-              },
-            ]}
-          >
-            {scanBusy ? (
-              <ActivityIndicator color={BakimateColors.accentTeal} />
-            ) : (
-              <Ionicons name="camera-outline" size={24} color={BakimateColors.accentTeal} />
-            )}
-            <Text style={[styles.qrLinkText, { color: BakimateColors.accentTeal }]}>
-              {scanBusy ? t("snap_receipt_busy") : t("snap_receipt")}
             </Text>
           </Pressable>
         ) : null}
@@ -557,7 +575,7 @@ export function RecordTransactionSheet({
               ) : null}
             </View>
 
-            {isCredit ? (
+            {isCredit && !isEditing ? (
               <>
                 <Text style={[styles.label, { color: muted }]}>{t("sheet_qist_goal_rm")}</Text>
                 <TextInput
@@ -620,14 +638,14 @@ export function RecordTransactionSheet({
             icon="checkmark"
             variant="success"
             size="lg"
-            label={t("save_transaction")}
-            accessibilityLabel={t("save_transaction")}
-            disabled={recordMut.isPending}
+            label={editingTransaction ? t("ledger_save_updates") : t("save_transaction")}
+            accessibilityLabel={editingTransaction ? t("ledger_save_updates") : t("save_transaction")}
+            disabled={recordMut.isPending || patchMut.isPending}
             style={styles.footerBtn}
           />
         </View>
 
-          {recordMut.isPending ? (
+          {recordMut.isPending || patchMut.isPending ? (
             <View style={styles.busyOverlay} pointerEvents="none">
               <ActivityIndicator color={BakimateColors.accentTeal} />
             </View>
@@ -639,6 +657,7 @@ export function RecordTransactionSheet({
 }
 
 const styles = StyleSheet.create({
+  sheetEditHint: { marginTop: 4, fontSize: 12, fontWeight: "800", letterSpacing: 0.2 },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",

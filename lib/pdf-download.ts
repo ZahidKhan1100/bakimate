@@ -1,12 +1,22 @@
 import { api, apiBaseUrl } from "@/lib/api";
+import { sharePdfFileWithWhatsAppTarget } from "@/lib/share-pdf-whatsapp";
 
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
 export type CustomerPdfKind = "ledger" | "settlement";
 
+/** When set on customer/supplier docs, opens WhatsApp to this chat on Android before falling back to the share sheet. */
+export type PdfShareTargetOptions = {
+  whatsappPhone?: string | null;
+};
+
 /** A4 credit invoice for a single posted credit transaction. */
-export async function shareCreditInvoicePdf(customerId: number, transactionId: number): Promise<void> {
+export async function shareCreditInvoicePdf(
+  customerId: number,
+  transactionId: number,
+  shareTarget?: PdfShareTargetOptions,
+): Promise<void> {
   if (customerId <= 0 || transactionId <= 0) {
     throw new Error("Invalid customer or transaction");
   }
@@ -43,11 +53,15 @@ export async function shareCreditInvoicePdf(customerId: number, transactionId: n
     throw new Error("Sharing is not available");
   }
 
-  await Sharing.shareAsync(res.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
+  await sharePdfFileWithWhatsAppTarget(res.uri, { whatsappPhone: shareTarget?.whatsappPhone });
 }
 
 /** A4 payment receipt for a single posted payment transaction. */
-export async function sharePaymentReceiptPdf(customerId: number, transactionId: number): Promise<void> {
+export async function sharePaymentReceiptPdf(
+  customerId: number,
+  transactionId: number,
+  shareTarget?: PdfShareTargetOptions,
+): Promise<void> {
   if (customerId <= 0 || transactionId <= 0) {
     throw new Error("Invalid customer or transaction");
   }
@@ -84,11 +98,105 @@ export async function sharePaymentReceiptPdf(customerId: number, transactionId: 
     throw new Error("Sharing is not available");
   }
 
-  await Sharing.shareAsync(res.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
+  await sharePdfFileWithWhatsAppTarget(res.uri, { whatsappPhone: shareTarget?.whatsappPhone });
+}
+
+/** A4 purchase / payable memo for a single supplier purchase transaction. */
+export async function shareSupplierPurchasePdf(
+  supplierId: number,
+  transactionId: number,
+  shareTarget?: PdfShareTargetOptions,
+): Promise<void> {
+  if (supplierId <= 0 || transactionId <= 0) {
+    throw new Error("Invalid supplier or transaction");
+  }
+
+  const path = `/suppliers/${supplierId}/documents/purchase/${transactionId}`;
+  const url = `${apiBaseUrl.replace(/\/+$/, "")}${path}`;
+
+  const authHdr = api.defaults.headers.common.Authorization;
+  if (!authHdr || typeof authHdr !== "string") {
+    throw new Error("Not authenticated");
+  }
+
+  const dir = FileSystem.cacheDirectory ?? null;
+  if (!dir) {
+    throw new Error("File cache is not available");
+  }
+
+  const fileUri = `${dir}bakimate-supplier-purchase-${supplierId}-${transactionId}.pdf`;
+
+  const res = await FileSystem.downloadAsync(url, fileUri, {
+    headers: {
+      Authorization: authHdr,
+      Accept: "application/pdf",
+    },
+  });
+
+  if (res.status !== 200) {
+    await FileSystem.deleteAsync(res.uri, { idempotent: true }).catch(() => undefined);
+    throw Object.assign(new Error(`PDF HTTP ${res.status}`), { statusCode: res.status });
+  }
+
+  const sharable = await Sharing.isAvailableAsync();
+  if (!sharable) {
+    throw new Error("Sharing is not available");
+  }
+
+  await sharePdfFileWithWhatsAppTarget(res.uri, { whatsappPhone: shareTarget?.whatsappPhone });
+}
+
+/** A4 payment voucher for money paid out to the supplier. */
+export async function shareSupplierPaymentOutPdf(
+  supplierId: number,
+  transactionId: number,
+  shareTarget?: PdfShareTargetOptions,
+): Promise<void> {
+  if (supplierId <= 0 || transactionId <= 0) {
+    throw new Error("Invalid supplier or transaction");
+  }
+
+  const path = `/suppliers/${supplierId}/documents/payment-out/${transactionId}`;
+  const url = `${apiBaseUrl.replace(/\/+$/, "")}${path}`;
+
+  const authHdr = api.defaults.headers.common.Authorization;
+  if (!authHdr || typeof authHdr !== "string") {
+    throw new Error("Not authenticated");
+  }
+
+  const dir = FileSystem.cacheDirectory ?? null;
+  if (!dir) {
+    throw new Error("File cache is not available");
+  }
+
+  const fileUri = `${dir}bakimate-supplier-pay-${supplierId}-${transactionId}.pdf`;
+
+  const res = await FileSystem.downloadAsync(url, fileUri, {
+    headers: {
+      Authorization: authHdr,
+      Accept: "application/pdf",
+    },
+  });
+
+  if (res.status !== 200) {
+    await FileSystem.deleteAsync(res.uri, { idempotent: true }).catch(() => undefined);
+    throw Object.assign(new Error(`PDF HTTP ${res.status}`), { statusCode: res.status });
+  }
+
+  const sharable = await Sharing.isAvailableAsync();
+  if (!sharable) {
+    throw new Error("Sharing is not available");
+  }
+
+  await sharePdfFileWithWhatsAppTarget(res.uri, { whatsappPhone: shareTarget?.whatsappPhone });
 }
 
 /** Download PDF via same auth headers as Axios, cache locally, open share sheet. */
-export async function shareCustomerPdf(customerId: number, kind: CustomerPdfKind): Promise<void> {
+export async function shareCustomerPdf(
+  customerId: number,
+  kind: CustomerPdfKind,
+  shareTarget?: PdfShareTargetOptions,
+): Promise<void> {
   if (customerId <= 0) {
     throw new Error("Invalid customer");
   }
@@ -126,7 +234,7 @@ export async function shareCustomerPdf(customerId: number, kind: CustomerPdfKind
     throw new Error("Sharing is not available");
   }
 
-  await Sharing.shareAsync(res.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
+  await sharePdfFileWithWhatsAppTarget(res.uri, { whatsappPhone: shareTarget?.whatsappPhone });
 }
 
 /** Current calendar month PDF (premium) — `month` format `YYYY-MM`. */

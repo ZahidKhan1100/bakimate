@@ -47,13 +47,16 @@ export function warnIfRevenueCatKeyWrongPlatform(apiKey: string): void {
   }
 }
 
-/** Entitlement identifier in RevenueCat dashboard (Products → Entitlements). */
+/**
+ * Entitlement **identifier** string from RevenueCat (Product catalog → Entitlements → Identifier).
+ * Must match **exactly** (case-sensitive). Wrong value ⇒ `customerInfo.entitlements.active` never hits after purchase.
+ * If you changed `EXPO_PUBLIC_REVENUECAT_PREMIUM_ENTITLEMENT_ID`, rebuild the native app so `extra` picks it up.
+ */
 export function getPremiumEntitlementIdentifier(): string {
   const ex = readExtra();
   const raw = ex.revenueCatPremiumEntitlementId;
   const s = typeof raw === "string" ? raw.trim() : "";
 
-  /** Must match entitlement identifier exactly in RevenueCat (Product catalog → Entitlements). */
   return s !== "" ? s : "BakiMate Pro";
 }
 

@@ -1,10 +1,32 @@
 import type { TFunction } from "i18next";
 import type { PurchasesPackage } from "react-native-purchases";
 
-import { MEMBERSHIP_USD_PRICE_TARGETS, membershipPackageTier } from "@/lib/membership-catalog";
+import { MEMBERSHIP_USD_PRICE_TARGETS, resolvedMembershipPackageTier } from "@/lib/membership-catalog";
 
-/** Short headline for store package type (localized). Fallback: abbreviated package type label. */
+/** Short headline: App Store product title when present, else localized label from tier / package type. */
 export function paywallPlanTitle(pkg: PurchasesPackage, t: TFunction): string {
+  const storeTitle =
+    typeof pkg.product.title === "string" ? pkg.product.title.trim() : "";
+  if (storeTitle !== "") {
+    return storeTitle;
+  }
+
+  const tier = resolvedMembershipPackageTier(pkg);
+  if (tier) {
+    switch (tier) {
+      case "monthly":
+        return t("membership_plan_monthly");
+      case "threeMonths":
+        return t("membership_plan_3mo");
+      case "sixMonths":
+        return t("membership_plan_6mo");
+      case "annual":
+        return t("membership_plan_year");
+      default:
+        break;
+    }
+  }
+
   const p = String(pkg.packageType).toUpperCase();
 
   switch (p) {
@@ -25,9 +47,15 @@ export function paywallPlanTitle(pkg: PurchasesPackage, t: TFunction): string {
   }
 }
 
-/** Optional subtitle: our reference USD tiers (helps when screenshots / reviews mention prices). Store still bills `pkg.product.priceString`. */
+/** Optional subtitle: reference USD tiers only when the store has not returned `priceString` yet. */
 export function paywallPlanReferenceBlurb(pkg: PurchasesPackage, t: TFunction): string | null {
-  const tier = membershipPackageTier(pkg);
+  const storePrice =
+    typeof pkg.product.priceString === "string" ? pkg.product.priceString.trim() : "";
+  if (storePrice !== "") {
+    return null;
+  }
+
+  const tier = resolvedMembershipPackageTier(pkg);
   if (!tier) {
     return null;
   }

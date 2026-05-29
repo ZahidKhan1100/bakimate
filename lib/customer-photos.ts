@@ -91,6 +91,16 @@ export async function setCustomerPhoto(customerId: number, sourceUri: string): P
   return target;
 }
 
+/** After offline customer sync, move the local photo from temp (negative) id to the server id. */
+export async function remapCustomerPhoto(fromId: number, toId: number): Promise<void> {
+  const uri = store.getState().photos[String(fromId)];
+  if (!uri) {
+    return;
+  }
+  await setCustomerPhoto(toId, uri);
+  await clearCustomerPhoto(fromId);
+}
+
 export async function clearCustomerPhoto(customerId: number): Promise<void> {
   const current = store.getState().photos[String(customerId)];
   store.getState().clear(customerId);

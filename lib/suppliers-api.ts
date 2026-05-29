@@ -1,5 +1,10 @@
 import { api } from "@/lib/api";
-import type { LaravelPaginator, Supplier, SupplierDetail } from "@/lib/api-types";
+import type {
+  LaravelPaginator,
+  Supplier,
+  SupplierDetail,
+  SupplierTransactionCreated,
+} from "@/lib/api-types";
 
 export async function fetchSuppliersPage(page = 1): Promise<LaravelPaginator<Supplier>> {
   const { data } = await api.get<LaravelPaginator<Supplier>>("/suppliers", { params: { page } });
@@ -25,7 +30,7 @@ export async function recordSupplierLedgerEntry(payload: {
   amount_sen: number;
   type: "purchase" | "payment_out";
   note?: string | null;
-}): Promise<{ id: number }> {
+}): Promise<SupplierTransactionCreated> {
   const { data } = await api.post("/supplier-transactions", payload);
   return data;
 }

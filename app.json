@@ -3,7 +3,7 @@
     "name": "BakiMate",
     "owner": "izahidkhan",
     "slug": "bakimate",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.jpg",
     "scheme": "bakimate",
@@ -17,7 +17,8 @@
         "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use the microphone.",
         "NSContactsUsageDescription": "BakiMate suggests names and phone numbers from your contacts when you add a customer or supplier.",
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "2"
     },
     "android": {
       "adaptiveIcon": {
@@ -72,6 +73,7 @@
     },
     "extra": {
       "apiUrl": "http://127.0.0.1:8000/api",
+      "websiteUrl": "https://bakimate.com",
       "revenueCatIos": "",
       "revenueCatAndroid": "",
       "revenueCatPremiumEntitlementId": "BakiMate Pro",

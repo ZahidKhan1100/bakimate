@@ -28,6 +28,7 @@ function colorsFor(variant: Variant): { bg: string; fg: string; shadow: string }
       return { bg: BakimateColors.success, fg: "#fff", shadow: BakimateColors.success };
     case "danger":
       return { bg: BakimateColors.danger, fg: "#fff", shadow: BakimateColors.danger };
+    /** Subtle idle state — OK on light UIs only; on dark mesh it disappears (prefer `primary` + `disabled`). */
     case "neutral":
       return { bg: "rgba(15, 23, 42, 0.06)", fg: BakimateColors.secondary, shadow: "transparent" };
     case "primary":

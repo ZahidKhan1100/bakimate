@@ -2,17 +2,18 @@ import { BigActionButton } from "@/components/ui/big-action-button";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
-import { loadContactsDirectory, matchContactSuggestions } from "@/lib/contact-suggestions";
+import { pickContactWithSystemPicker } from "@/lib/contact-suggestions";
 import { useCreateSupplier } from "@/lib/hooks/useSuppliers";
 import { Ionicons } from "@expo/vector-icons";
-import * as Contacts from "expo-contacts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
+  InteractionManager,
+  Keyboard,
+  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -38,27 +39,66 @@ export function AddSupplierSheet({ visible, isDark, onClose }: Props) {
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [contactsDir, setContactsDir] = useState<Contacts.Contact[]>([]);
+  const [contactsBusy, setContactsBusy] = useState(false);
+  /** Android: avoid native crash when launching contact picker above RN Modal. */
+  const [androidHideSheetForContactPicker, setAndroidHideSheetForContactPicker] = useState(false);
 
   const createMut = useCreateSupplier();
 
   useEffect(() => {
     if (!visible) {
-      setContactsDir([]);
-      return;
+      setContactsBusy(false);
+      setAndroidHideSheetForContactPicker(false);
     }
-    let cancelled = false;
-    void loadContactsDirectory().then((list) => {
-      if (!cancelled) {
-        setContactsDir(list ?? []);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
   }, [visible]);
 
-  const nameSuggestions = useMemo(() => matchContactSuggestions(contactsDir, name), [contactsDir, name]);
+  const pickFromContacts = () => {
+    if (Platform.OS === "web") {
+      Alert.alert(t("error"), t("snap_receipt_web_unavailable"));
+      return;
+    }
+    if (contactsBusy) return;
+    setContactsBusy(true);
+    Keyboard.dismiss();
+    const preDelayMs = Platform.OS === "android" ? 120 : 320;
+    const androidModalGapMs = 420;
+
+    setTimeout(() => {
+      void (async () => {
+        try {
+          if (Platform.OS === "android") {
+            setAndroidHideSheetForContactPicker(true);
+            await new Promise<void>((resolve) => {
+              InteractionManager.runAfterInteractions(() => setTimeout(resolve, androidModalGapMs));
+            });
+            try {
+              const { suggestion: s, permissionDenied } = await pickContactWithSystemPicker();
+              if (permissionDenied) {
+                Alert.alert(t("error"), t("contact_suggestions_permission_denied"));
+              }
+              if (s) {
+                setName(s.name);
+                if (s.phone) setPhone(s.phone);
+              }
+            } finally {
+              setAndroidHideSheetForContactPicker(false);
+            }
+          } else {
+            const { suggestion: s, permissionDenied } = await pickContactWithSystemPicker();
+            if (permissionDenied) {
+              Alert.alert(t("error"), t("contact_suggestions_permission_denied"));
+            }
+            if (s) {
+              setName(s.name);
+              if (s.phone) setPhone(s.phone);
+            }
+          }
+        } finally {
+          setContactsBusy(false);
+        }
+      })();
+    }, preDelayMs);
+  };
 
   const handleClose = () => {
     setName("");
@@ -83,7 +123,12 @@ export function AddSupplierSheet({ visible, isDark, onClose }: Props) {
   };
 
   return (
-    <BottomSheet visible={visible} onClose={handleClose} isDark={isDark} scrollable>
+    <BottomSheet
+      visible={visible && !androidHideSheetForContactPicker}
+      onClose={handleClose}
+      isDark={isDark}
+      scrollable
+    >
       <View style={styles.iconWrap}>
         <View style={[styles.iconDisc, { backgroundColor: BakimateColors.accentTeal + "22" }]}>
           <Ionicons name="cube" size={48} color={BakimateColors.accentTeal} />
@@ -96,42 +141,32 @@ export function AddSupplierSheet({ visible, isDark, onClose }: Props) {
         onChangeText={setName}
         placeholder={t("supplier_name")}
         placeholderTextColor={muted}
-        autoFocus
         style={[styles.input, { color: headline, borderColor: inputBorder }]}
       />
 
-      {nameSuggestions.length > 0 ? (
-        <View style={styles.suggestBlock}>
-          <Text style={[styles.suggestTitle, { color: muted }]}>{t("contact_suggestions_title")}</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <View style={styles.suggestRow}>
-              {nameSuggestions.map((s) => (
-                <Pressable
-                  key={s.id}
-                  onPress={() => {
-                    setName(s.name);
-                    setPhone(s.phone);
-                  }}
-                  style={({ pressed }) => [
-                    styles.suggestChip,
-                    {
-                      borderColor: inputBorder,
-                      backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(46,196,182,0.12)",
-                      opacity: pressed ? 0.85 : 1,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.suggestName, { color: headline }]} numberOfLines={1}>
-                    {s.name}
-                  </Text>
-                  <Text style={[styles.suggestPhone, { color: muted }]} numberOfLines={1}>
-                    {s.phone}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
-        </View>
+      {Platform.OS !== "web" ? (
+        <Pressable
+          onPress={pickFromContacts}
+          disabled={contactsBusy}
+          accessibilityRole="button"
+          accessibilityLabel={t("contact_suggestions_match")}
+          style={({ pressed }) => [
+            styles.contactMatchRow,
+            {
+              borderColor: inputBorder,
+              opacity: contactsBusy ? 0.7 : pressed ? 0.88 : 1,
+            },
+          ]}
+        >
+          {contactsBusy ? (
+            <ActivityIndicator color={BakimateColors.accentTeal} />
+          ) : (
+            <>
+              <Ionicons name="people-outline" size={20} color={BakimateColors.accentTeal} />
+              <Text style={[styles.contactMatchText, { color: headline }]}>{t("contact_suggestions_match")}</Text>
+            </>
+          )}
+        </Pressable>
       ) : null}
 
       <Text style={[styles.label, { color: muted }]}>{t("phone_optional")}</Text>
@@ -183,19 +218,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   label: { fontSize: 12, fontWeight: "800", marginBottom: 6, marginTop: 8 },
-  suggestBlock: { marginTop: 4, marginBottom: 4 },
-  suggestTitle: { fontSize: 11, fontWeight: "800", marginBottom: 8 },
-  suggestRow: { flexDirection: "row", gap: 10, paddingRight: 8 },
-  suggestChip: {
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 8,
+  contactMatchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 6,
+    marginBottom: 2,
+    paddingVertical: 10,
     paddingHorizontal: 12,
-    minWidth: 120,
-    maxWidth: 200,
+    borderRadius: 14,
+    borderWidth: 1,
+    backgroundColor: "rgba(46, 196, 182, 0.08)",
   },
-  suggestName: { fontSize: 14, fontWeight: "800" },
-  suggestPhone: { fontSize: 12, fontWeight: "600", marginTop: 2 },
+  contactMatchText: { fontSize: 14, fontWeight: "800" },
   input: {
     borderWidth: 1,
     borderRadius: 14,

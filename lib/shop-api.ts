@@ -14,8 +14,10 @@ export type ShopPatchBody = {
   reference_currency_per_myr: number | null;
 };
 
-export async function fetchShopProfile(): Promise<ShopApi> {
-  const { data } = await api.get<ShopApi>("/shop");
+export async function fetchShopProfile(opts?: { timeoutMs?: number }): Promise<ShopApi> {
+  const { data } = await api.get<ShopApi>("/shop", {
+    ...(opts?.timeoutMs != null ? { timeout: opts.timeoutMs } : {}),
+  });
   const uid = useSessionStore.getState().user?.id;
   if (uid != null) {
     useSessionStore.getState().setShopProfile(shopApiToProfile(data));
