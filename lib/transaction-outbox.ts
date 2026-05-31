@@ -53,15 +53,34 @@ function summarizeAxios(e: unknown): string {
   return String(e);
 }
 
-/** Job will not retry (billing / validation). Tombstone locally — do **not** include 403: shop subscription may lapse offline then renew; keep row until POST succeeds or user fixes account. */
+/**
+ * Tombstone only hard billing blocks. Do **not** supersede 422 (e.g. customer_id not synced yet) or 403
+ * (subscription may renew after offline queue).
+ */
 function shouldSupersede(e: unknown): boolean {
   if (!axios.isAxiosError(e)) {
     return false;
   }
 
-  const s = e.response?.status;
+  return e.response?.status === 402;
+}
 
-  return s === 402 || s === 422;
+function isSubscriptionBlockedError(e: unknown): boolean {
+  if (!axios.isAxiosError(e)) {
+    return false;
+  }
+
+  if (e.response?.status !== 403) {
+    return false;
+  }
+
+  const data = e.response.data;
+  const msg =
+    typeof data === "object" && data !== null && "message" in data
+      ? String((data as { message?: unknown }).message)
+      : "";
+
+  return /subscription/i.test(msg);
 }
 
 /** Recoverable failures (timeouts, offline, server errors). */
@@ -131,6 +150,41 @@ export async function outboxLength(): Promise<number> {
   const entries = await readWebOutbox();
 
   return entries.length;
+}
+
+export type OutboxSyncSummary = {
+  pending: number;
+  /** First non-superseded row's last_error (flush failures). */
+  firstError: string | null;
+  subscriptionBlocked: boolean;
+};
+
+export async function getOutboxSyncSummary(): Promise<OutboxSyncSummary> {
+  const db = await openBakimateDatabase();
+  if (db) {
+    type CountRow = { c: number };
+    type ErrRow = { last_error: string | null };
+    const countRow = await db.getFirstAsync<CountRow>(
+      `SELECT COUNT(*) AS c FROM outbox_transactions WHERE superseded = 0`,
+    );
+    const errRow = await db.getFirstAsync<ErrRow>(
+      `SELECT last_error FROM outbox_transactions WHERE superseded = 0 AND last_error IS NOT NULL
+       ORDER BY created_at ASC LIMIT 1`,
+    );
+    const err = errRow?.last_error ?? null;
+    return {
+      pending: countRow?.c ?? 0,
+      firstError: err,
+      subscriptionBlocked: Boolean(err && /subscription/i.test(err)),
+    };
+  }
+
+  const entries = await readWebOutbox();
+  return {
+    pending: entries.length,
+    firstError: null,
+    subscriptionBlocked: false,
+  };
 }
 
 export async function pendingCountForCustomer(customerId: number): Promise<number> {
@@ -234,8 +288,18 @@ async function flushTransactionOutboxImpl(): Promise<{
         continue;
       }
 
+      if (!Number.isFinite(payload.customer_id) || payload.customer_id < 1) {
+        const msg = `waiting for customer ${payload.customer_id} to sync`;
+        await bumpAttemptSQLite(db, row.id, msg);
+        failed++;
+        touchedCustomers.add(payload.customer_id);
+        continue;
+      }
+
       try {
-        await api.post<RecordTransactionApiResponse>("/transactions", payload);
+        await api.post<RecordTransactionApiResponse>("/transactions", payload, {
+          headers: { "X-Bakimate-Offline-Sync": "1" },
+        });
         await db.runAsync(`DELETE FROM outbox_transactions WHERE id = ?`, row.id);
         sent++;
         touchedCustomers.add(payload.customer_id);
@@ -248,6 +312,10 @@ async function flushTransactionOutboxImpl(): Promise<{
         if (shouldSupersede(e)) {
           await supersedeSQLiteRow(db, row.id, summarizeAxios(e));
           superseded++;
+          touchedCustomers.add(payload.customer_id);
+        } else if (isSubscriptionBlockedError(e)) {
+          await bumpAttemptSQLite(db, row.id, summarizeAxios(e));
+          failed++;
           touchedCustomers.add(payload.customer_id);
         } else if (looksRetryable(e)) {
           await bumpAttemptSQLite(db, row.id, summarizeAxios(e));
@@ -280,8 +348,16 @@ async function flushTransactionOutboxImpl(): Promise<{
 
   for (let i = 0; i < entries.length; i++) {
     const row = entries[i];
+    if (!Number.isFinite(row.payload.customer_id) || row.payload.customer_id < 1) {
+      remaining.push(row);
+      failed++;
+      touched.add(row.payload.customer_id);
+      continue;
+    }
     try {
-      await api.post<RecordTransactionApiResponse>("/transactions", row.payload);
+      await api.post<RecordTransactionApiResponse>("/transactions", row.payload, {
+        headers: { "X-Bakimate-Offline-Sync": "1" },
+      });
       sent++;
       touched.add(row.payload.customer_id);
     } catch (e) {

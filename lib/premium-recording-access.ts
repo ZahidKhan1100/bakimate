@@ -6,6 +6,7 @@ import { Qk } from "@/lib/hooks/query-keys";
 import { ensureRevenueCatConfigured } from "@/lib/revenuecat-configure";
 import { queryClient } from "@/lib/query-client";
 import { getNativeRevenueCatApiKey, getPremiumEntitlementIdentifier } from "@/lib/revenuecat-settings";
+import { fetchIsDeviceOffline } from "@/lib/network-offline";
 import { fetchShopProfile } from "@/lib/shop-api";
 
 /** Result shared by TanStack Query and the recording mutation gate. */
@@ -82,6 +83,11 @@ export async function fetchPremiumRecordingAccess(): Promise<PremiumRecordingAcc
 }
 
 export async function assertRecordingPremiumOrThrow(): Promise<void> {
+  /** Queue-first offline recording: enforce subscription when we can reach the server, not on-device only. */
+  if (await fetchIsDeviceOffline()) {
+    return;
+  }
+
   const s = await fetchPremiumRecordingAccess();
 
   if (s.requiresPremium && !s.entitled) {

@@ -55,13 +55,22 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   const androidNext: ExpoConfig["android"] = {
     ...(prevAndroid as NonNullable<ExpoConfig["android"]>),
+    /** Must exceed every versionCode already uploaded to Play (e.g. 9 for 1.0.0, 3 for an internal build). */
+    versionCode: 10,
     intentFilters: hasOauthPkgFilter
       ? existingIntentFilters
       : [...existingIntentFilters, oauthAndroidRedirectIntentFilter(androidPkg)],
   };
 
+  const iosMarketingVersion =
+    typeof config.version === "string" && config.version.length > 0 ? config.version : "1.0.1";
+  /** Play Store user-facing version for Android builds; iOS keeps app.json `version` (1.0.1). */
+  const marketingVersion =
+    process.env.EAS_BUILD_PLATFORM === "android" ? "1.0.0" : iosMarketingVersion;
+
   return {
     ...config,
+    version: marketingVersion,
     scheme: schemeMerged,
     android: androidNext,
     plugins: [

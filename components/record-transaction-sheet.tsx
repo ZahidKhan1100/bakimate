@@ -17,19 +17,33 @@ import {
 import { iconForQuickItem } from "@/lib/quick-item-icons";
 import { shareCreditInvoicePdf, sharePaymentReceiptPdf } from "@/lib/pdf-download";
 import { profileToReceiptBlurb, resolveShopProfile } from "@/lib/shop-profile";
+import { apiErrorMessage } from "@/lib/api-error-message";
+import { isAbortError } from "@/lib/is-abort-error";
+import { fetchIsDeviceOffline } from "@/lib/network-offline";
 import type { OutboxTransactionPayload } from "@/lib/transaction-outbox";
-import { useVoiceNoteComposer } from "@/lib/use-voice-note";
+import { useVoiceLedgerCapture } from "@/lib/use-voice-ledger";
+import {
+  parseVoiceLedger,
+  type VoiceLedgerParseResponse,
+} from "@/lib/voice-ledger-parse-api";
+import { resolveVoiceQuickItem } from "@/lib/match-voice-quick-item";
+import {
+  buildVoiceContextualStrings,
+  resolveVoiceSttBcp47,
+} from "@/lib/voice-stt-locale";
 import { openWhatsAppText } from "@/lib/whatsapp";
 import { normalizePhoneForWaMe } from "@/lib/phone-wa-me";
 import { useSessionStore } from "@/stores/session-store";
+import { useUiPreferencesStore } from "@/stores/ui-preferences-store";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -100,6 +114,20 @@ export function RecordTransactionSheet({
   const [goalPayByYmd, setGoalPayByYmd] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
+  const [voiceConfirm, setVoiceConfirm] = useState<VoiceLedgerParseResponse | null>(null);
+  const [voiceParsing, setVoiceParsing] = useState(false);
+
+  const voiceSttPref = useUiPreferencesStore((s) => s.voiceSttLocale);
+
+  const voiceParseAbortRef = useRef<AbortController | null>(null);
+  const voiceParseGenRef = useRef(0);
+
+  const cancelVoiceParse = useCallback(() => {
+    voiceParseGenRef.current += 1;
+    voiceParseAbortRef.current?.abort();
+    voiceParseAbortRef.current = null;
+    setVoiceParsing(false);
+  }, []);
 
   const resetState = () => {
     setValueSen(0);
@@ -109,6 +137,8 @@ export function RecordTransactionSheet({
     setGoalAmountRmText("");
     setGoalPayByYmd("");
     setMoreOpen(false);
+    setVoiceConfirm(null);
+    setVoiceParsing(false);
   };
 
   const editingId = editingTransaction?.id ?? 0;
@@ -135,20 +165,150 @@ export function RecordTransactionSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resetBranch uses stable resetState-shaped fields only when opening/closing modes
   }, [visible, editingId]);
 
-  const speechLocale = i18n.language.startsWith("ms") ? "ms-MY" : "en-US";
-  const { speechAvailable, listening, toggleListening } = useVoiceNoteComposer({
-    locale: speechLocale,
-    onAppendFinal: (text) => setNote((p) => (p.trim() ? `${p.trim()} ${text}` : text)),
-  });
+  const sttLocale = resolveVoiceSttBcp47(voiceSttPref, i18n.language);
+  const contextualStrings = useMemo(
+    () =>
+      buildVoiceContextualStrings({
+        customerName: customer.name,
+        quickItems,
+        currencyCode: currency,
+      }),
+    [customer.name, quickItems, currency],
+  );
 
-  if (!mode) return null;
+  const { speechAvailable, listening, interimTranscript, listenOnce, cancelListening } =
+    useVoiceLedgerCapture({
+      locale: sttLocale,
+      contextualStrings,
+    });
+
+  useEffect(() => {
+    if (!visible) {
+      cancelVoiceParse();
+      cancelListening();
+    }
+  }, [visible, cancelVoiceParse, cancelListening]);
+
+  useEffect(() => {
+    return () => {
+      voiceParseGenRef.current += 1;
+      voiceParseAbortRef.current?.abort();
+      voiceParseAbortRef.current = null;
+    };
+  }, []);
 
   const isCredit = mode === "credit";
   const isEditing = editingTransaction != null;
+
+  const handleVoiceSpeak = useCallback(async () => {
+    if (!mode || isEditing) {
+      return;
+    }
+    if (await fetchIsDeviceOffline()) {
+      Alert.alert(t("error"), t("voice_requires_internet"));
+      return;
+    }
+    setVoiceConfirm(null);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+
+    const transcript = await listenOnce();
+    const trimmed = transcript.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    voiceParseAbortRef.current?.abort();
+    voiceParseGenRef.current += 1;
+    const gen = voiceParseGenRef.current;
+    const ac = new AbortController();
+    voiceParseAbortRef.current = ac;
+    setVoiceParsing(true);
+
+    try {
+      const parsed = await parseVoiceLedger(
+        {
+          transcript: trimmed,
+          intent_hint: mode === "credit" ? "credit" : "payment",
+          currency_code: currency,
+          customer_name: customer.name,
+          quick_items: quickItems,
+          app_language: i18n.language.startsWith("ms") ? "ms" : "en",
+        },
+        ac.signal,
+      );
+
+      if (gen !== voiceParseGenRef.current) {
+        return;
+      }
+
+      if (parsed.error_code === "gemini_not_configured") {
+        Alert.alert(t("error"), t("voice_gemini_not_configured"));
+        return;
+      }
+
+      if (
+        parsed.amount_sen == null ||
+        parsed.amount_sen <= 0 ||
+        parsed.confidence === "low"
+      ) {
+        Alert.alert(t("voice_parse_low_confidence_title"), t("voice_parse_low_confidence_body"));
+        return;
+      }
+
+      const resolvedItem =
+        mode === "credit"
+          ? resolveVoiceQuickItem({
+              itemKey: parsed.item_key,
+              note: parsed.note,
+              transcript: trimmed,
+              quickItems,
+            })
+          : null;
+
+      setVoiceConfirm({
+        ...parsed,
+        item_key: resolvedItem,
+      });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (e: unknown) {
+      if (isAbortError(e) || gen !== voiceParseGenRef.current) {
+        return;
+      }
+      Alert.alert(t("error"), apiErrorMessage(e));
+    } finally {
+      if (gen === voiceParseGenRef.current) {
+        voiceParseAbortRef.current = null;
+        setVoiceParsing(false);
+      }
+    }
+  }, [currency, customer.name, i18n.language, isEditing, listenOnce, mode, quickItems, t]);
+
+  const applyVoiceConfirm = useCallback(() => {
+    if (!voiceConfirm?.amount_sen || voiceConfirm.amount_sen <= 0) {
+      return;
+    }
+    setValueSen(voiceConfirm.amount_sen);
+    if (voiceConfirm.note?.trim()) {
+      setNote(voiceConfirm.note.trim());
+    }
+    if (voiceConfirm.next_due_at) {
+      setNextDue(voiceConfirm.next_due_at);
+    }
+    if (voiceConfirm.item_key) {
+      setSelectedQuickItem(voiceConfirm.item_key);
+    }
+    setVoiceConfirm(null);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  }, [voiceConfirm]);
+
+  if (!mode) return null;
+
   const accentColor = isCredit ? BakimateColors.danger : BakimateColors.success;
   const presets = { d7: addDaysLocal(7), d14: addDaysLocal(14), d30: addDaysLocal(30) };
 
   const handleClose = () => {
+    cancelVoiceParse();
+    cancelListening();
     resetState();
     onClose();
   };
@@ -346,6 +506,7 @@ export function RecordTransactionSheet({
   ];
 
   return (
+    <>
     <BottomSheet visible={visible} onClose={handleClose} isDark={isDark} scrollable>
       {successOpen ? (
         <View style={styles.successWrap}>
@@ -380,6 +541,127 @@ export function RecordTransactionSheet({
             ) : null}
           </View>
         </View>
+
+        {!isEditing && speechAvailable ? (
+          <View style={styles.voiceSection}>
+            <Pressable
+              onPress={() => {
+                if (voiceParsing) return;
+                if (listening) {
+                  cancelListening();
+                  return;
+                }
+                void handleVoiceSpeak();
+              }}
+              disabled={voiceParsing}
+              accessibilityRole="button"
+              accessibilityLabel={t("voice_speak_row")}
+              style={({ pressed }) => [
+                styles.voiceSpeakBtn,
+                {
+                  borderColor: listening ? BakimateColors.accentTeal : BakimateColors.border,
+                  backgroundColor: listening
+                    ? "rgba(46, 196, 182, 0.2)"
+                    : isDark
+                      ? "rgba(255,255,255,0.05)"
+                      : "rgba(255,255,255,0.75)",
+                  opacity: pressed || voiceParsing ? 0.88 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name={listening ? "mic" : "mic-outline"}
+                size={28}
+                color={listening ? BakimateColors.danger : BakimateColors.accentTeal}
+              />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.voiceSpeakTitle, { color: headline }]}>
+                  {listening ? t("voice_listening") : t("voice_speak_row")}
+                </Text>
+                <Text style={[styles.voiceSpeakHint, { color: muted }]} numberOfLines={2}>
+                  {interimTranscript.trim() ||
+                    (isCredit && quickItems.length > 0
+                      ? t("voice_speak_hint_credit")
+                      : t("voice_speak_hint"))}
+                </Text>
+              </View>
+            </Pressable>
+
+            {voiceConfirm?.amount_sen ? (
+              <View
+                style={[
+                  styles.voiceConfirmCard,
+                  {
+                    borderColor: accentColor,
+                    backgroundColor: isDark
+                      ? `${accentColor}18`
+                      : `${accentColor}12`,
+                  },
+                ]}
+              >
+                <MoneyDisplay
+                  sen={voiceConfirm.amount_sen}
+                  currencyCode={currency}
+                  size="medium"
+                  color={accentColor}
+                />
+                {voiceConfirm.summary ? (
+                  <Text style={[styles.voiceConfirmSummary, { color: headline }]} numberOfLines={2}>
+                    {voiceConfirm.summary}
+                  </Text>
+                ) : null}
+                {isCredit && quickItems.length > 0 ? (
+                  <View style={styles.voiceConfirmItemRow}>
+                    {voiceConfirm.item_key ? (
+                      <>
+                        <Ionicons
+                          name={iconForQuickItem(voiceConfirm.item_key)}
+                          size={22}
+                          color={BakimateColors.accentTeal}
+                        />
+                        <Text style={[styles.voiceConfirmItemLabel, { color: headline }]}>
+                          {t("voice_confirm_sold", { item: voiceConfirm.item_key })}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={[styles.voiceConfirmItemMissing, { color: muted }]}>
+                        {t("voice_confirm_sold_unknown")}
+                      </Text>
+                    )}
+                  </View>
+                ) : null}
+                <View style={styles.voiceConfirmActions}>
+                  <Pressable
+                    onPress={() => setVoiceConfirm(null)}
+                    style={({ pressed }) => [
+                      styles.voiceConfirmBtn,
+                      { opacity: pressed ? 0.85 : 1, borderColor: muted },
+                    ]}
+                  >
+                    <Text style={[styles.voiceConfirmBtnText, { color: muted }]}>
+                      {t("voice_confirm_retry")}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={applyVoiceConfirm}
+                    style={({ pressed }) => [
+                      styles.voiceConfirmBtn,
+                      styles.voiceConfirmBtnPrimary,
+                      {
+                        backgroundColor: accentColor,
+                        opacity: pressed ? 0.9 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.voiceConfirmBtnText, { color: "#fff" }]}>
+                      {t("voice_confirm_use")}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Quick amount chips */}
         <View style={{ marginTop: 6, marginBottom: 8 }}>
@@ -531,49 +813,26 @@ export function RecordTransactionSheet({
         {moreOpen ? (
           <View style={styles.moreSection}>
             <Text style={[styles.label, { color: muted }]}>{t("note_optional")}</Text>
-            <View style={styles.noteRow}>
-              <TextInput
-                value={note}
-                onChangeText={setNote}
-                placeholder={t("note_placeholder")}
-                placeholderTextColor={muted}
-                multiline
-                style={[
-                  styles.input,
-                  styles.noteInput,
-                  {
-                    borderColor: isDark
-                      ? BakimateColors.glassBorderDark
-                      : "rgba(15, 23, 42, 0.12)",
-                    color: headline,
-                    backgroundColor: isDark
-                      ? "rgba(255, 255, 255, 0.04)"
-                      : "rgba(255, 255, 255, 0.5)",
-                  },
-                ]}
-              />
-              {speechAvailable ? (
-                <Pressable
-                  onPress={() => void toggleListening()}
-                  style={[
-                    styles.micHit,
-                    {
-                      borderColor: listening
-                        ? BakimateColors.accentTeal
-                        : isDark
-                          ? BakimateColors.glassBorderDark
-                          : "rgba(15, 23, 42, 0.12)",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={listening ? "mic" : "mic-outline"}
-                    size={22}
-                    color={listening ? BakimateColors.danger : headline}
-                  />
-                </Pressable>
-              ) : null}
-            </View>
+            <TextInput
+              value={note}
+              onChangeText={setNote}
+              placeholder={t("note_placeholder")}
+              placeholderTextColor={muted}
+              multiline
+              style={[
+                styles.input,
+                styles.noteInput,
+                {
+                  borderColor: isDark
+                    ? BakimateColors.glassBorderDark
+                    : "rgba(15, 23, 42, 0.12)",
+                  color: headline,
+                  backgroundColor: isDark
+                    ? "rgba(255, 255, 255, 0.04)"
+                    : "rgba(255, 255, 255, 0.5)",
+                },
+              ]}
+            />
 
             {isCredit && !isEditing ? (
               <>
@@ -653,6 +912,47 @@ export function RecordTransactionSheet({
         </>
       )}
     </BottomSheet>
+
+    <Modal
+      visible={voiceParsing}
+      transparent
+      animationType="fade"
+      onRequestClose={cancelVoiceParse}
+      statusBarTranslucent
+    >
+      <View style={styles.voiceParseModalRoot}>
+        <View
+          style={[
+            styles.voiceParseModalCard,
+            {
+              backgroundColor: isDark ? "rgba(15, 23, 42, 0.98)" : "#fff",
+              borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15, 23, 42, 0.12)",
+            },
+          ]}
+        >
+          <ActivityIndicator size="large" color={BakimateColors.accentTeal} />
+          <Text style={[styles.voiceParseModalTitle, { color: headline }]}>{t("voice_parsing")}</Text>
+          <Text style={[styles.voiceParseModalHint, { color: muted }]}>{t("voice_parsing_modal_hint")}</Text>
+          <Pressable
+            onPress={cancelVoiceParse}
+            accessibilityRole="button"
+            accessibilityLabel={t("cancel")}
+            style={({ pressed }) => [
+              styles.voiceParseModalCancel,
+              {
+                borderColor: BakimateColors.danger,
+                opacity: pressed ? 0.88 : 1,
+              },
+            ]}
+          >
+            <Text style={[styles.voiceParseModalCancelText, { color: BakimateColors.danger }]}>
+              {t("cancel")}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 }
 
@@ -727,16 +1027,71 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 16,
   },
-  noteRow: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
-  noteInput: { flex: 1, minHeight: 80, textAlignVertical: "top" },
-  micHit: {
-    width: 48,
-    height: 52,
-    borderRadius: 12,
+  noteInput: { minHeight: 80, textAlignVertical: "top" },
+  voiceSection: { marginTop: 10, gap: 10 },
+  voiceSpeakBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+  },
+  voiceSpeakTitle: { fontSize: 15, fontWeight: "900" },
+  voiceSpeakHint: { marginTop: 2, fontSize: 12, fontWeight: "600" },
+  voiceConfirmCard: {
     borderWidth: 2,
+    borderRadius: 16,
+    padding: 14,
+    gap: 8,
+  },
+  voiceConfirmSummary: { fontSize: 14, fontWeight: "700" },
+  voiceConfirmItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  voiceConfirmItemLabel: { fontSize: 14, fontWeight: "800", flex: 1 },
+  voiceConfirmItemMissing: { fontSize: 13, fontWeight: "600", fontStyle: "italic" },
+  voiceConfirmActions: { flexDirection: "row", gap: 10, marginTop: 4 },
+  voiceConfirmBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: "center",
+  },
+  voiceConfirmBtnPrimary: { borderWidth: 0 },
+  voiceConfirmBtnText: { fontSize: 14, fontWeight: "900" },
+  voiceParseModalRoot: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
     alignItems: "center",
     justifyContent: "center",
+    padding: 24,
   },
+  voiceParseModalCard: {
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingVertical: 28,
+    paddingHorizontal: 22,
+    alignItems: "center",
+    gap: 10,
+  },
+  voiceParseModalTitle: { fontSize: 17, fontWeight: "900", marginTop: 4 },
+  voiceParseModalHint: { fontSize: 13, fontWeight: "600", textAlign: "center", lineHeight: 18 },
+  voiceParseModalCancel: {
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+  },
+  voiceParseModalCancelText: { fontSize: 15, fontWeight: "900" },
   footerActions: { flexDirection: "row", gap: 12, marginTop: 18 },
   footerBtn: { flex: 1 },
   busyOverlay: {

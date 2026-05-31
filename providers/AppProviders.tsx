@@ -17,7 +17,10 @@ import { ensureRevenueCatConfigured } from "@/lib/revenuecat-configure";
 import { fetchCustomersPage } from "@/lib/customers-api";
 import { fetchReportSummary } from "@/lib/reports-api";
 import { fetchShopProfile } from "@/lib/shop-api";
-import { flushAllOutboxes } from "@/lib/customer-outbox";
+import { listPendingCustomerPayloads } from "@/lib/customer-outbox";
+import { flushOutboxesNow } from "@/lib/flush-outboxes-now";
+import { isNetInfoOnline } from "@/lib/network-offline";
+import { outboxLength } from "@/lib/transaction-outbox";
 import {
   cancelWeeklyInsightsReminder,
   scheduleWeeklyInsightsReminder,
@@ -90,25 +93,17 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    const invalidateSyncedData = async () => {
-      await queryClient.invalidateQueries({ queryKey: Qk.reportSummary });
-      await queryClient.invalidateQueries({ queryKey: Qk.insights });
-      await queryClient.invalidateQueries({
-        predicate: (q) =>
-          Array.isArray(q.queryKey) &&
-          (q.queryKey[0] === "customers" || q.queryKey[0] === "customer"),
-      });
-    };
-
     const tryFlush = async () => {
       if (!useSessionStore.getState().token) {
         return;
       }
       try {
-        const r = await flushAllOutboxes();
-        if (!cancelled && (r.customers.sent > 0 || r.transactions.sent > 0)) {
-          await invalidateSyncedData();
+        const [txPending, customerRows] = await Promise.all([outboxLength(), listPendingCustomerPayloads()]);
+        if (txPending === 0 && customerRows.length === 0) {
+          return;
         }
+
+        await flushOutboxesNow();
       } catch {
         /** queue flush is best-effort */
       }
@@ -117,10 +112,19 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     void tryFlush();
 
     const unsubNet = NetInfo.addEventListener((s) => {
-      if (s.isConnected !== false && s.isInternetReachable !== false) {
+      if (isNetInfoOnline(s)) {
         void tryFlush();
       }
     });
+
+    const retryTimer = setInterval(() => {
+      void (async () => {
+        const n = await outboxLength();
+        if (n > 0) {
+          void tryFlush();
+        }
+      })();
+    }, 45_000);
 
     const onAppState = (next: AppStateStatus) => {
       if (next === "active") {
@@ -131,6 +135,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      clearInterval(retryTimer);
       unsubNet();
       subApp.remove();
     };
@@ -145,6 +150,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     let listenerAdded = false;
     const listener = () => {
       void queryClient.invalidateQueries({ queryKey: Qk.premiumRecordingAccess });
+      void flushOutboxesNow();
     };
 
     void (async () => {

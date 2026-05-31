@@ -7,8 +7,8 @@ export function useOutboxPendingForCustomer(customerId: number, enabled = true) 
   return useQuery({
     queryKey: Qk.outboxCustomer(customerId),
     queryFn: () => pendingCountForCustomer(customerId),
-    enabled: enabled && customerId > 0,
+    enabled: enabled && customerId !== 0,
     staleTime: 2_500,
-    refetchInterval: 12_000,
+    refetchInterval: 8_000,
   });
 }

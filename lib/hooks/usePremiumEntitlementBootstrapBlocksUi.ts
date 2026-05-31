@@ -1,6 +1,8 @@
 import { useNetInfo } from "@react-native-community/netinfo";
 import { Platform } from "react-native";
 
+import { isNetInfoOffline } from "@/lib/network-offline";
+
 /**
  * While RevenueCat + `/shop` entitlement data is loading, recording buttons stay disabled on native.
  * When the device reports no connection, skip that block so users can queue transactions offline
@@ -13,7 +15,5 @@ export function usePremiumEntitlementBootstrapBlocksUi(isPremiumQueryLoading: bo
     return false;
   }
 
-  const explicitlyOffline = net.isConnected === false || net.isInternetReachable === false;
-
-  return !explicitlyOffline;
+  return !isNetInfoOffline(net);
 }

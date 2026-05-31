@@ -1,7 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import NetInfo from "@react-native-community/netinfo";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import axios from "axios";
 
 import { recordTransaction } from "@/lib/transactions-api";
 
@@ -11,18 +10,7 @@ import { enqueueTransaction } from "@/lib/transaction-outbox";
 
 import { Qk } from "@/lib/hooks/query-keys";
 import { assertRecordingPremiumOrThrow } from "@/lib/premium-recording-access";
-
-function looksOffline(e: unknown): boolean {
-  if (axios.isAxiosError(e)) {
-    if (e.code === "ERR_NETWORK" || !e.response) {
-      return true;
-    }
-  }
-  const msg =
-    typeof e === "object" && e !== null && "message" in e ? String((e as { message?: unknown }).message) : "";
-
-  return /network/i.test(msg);
-}
+import { isNetInfoOffline, looksOfflineError } from "@/lib/network-offline";
 
 async function invalidateAfterMutation(qc: QueryClient, customerId?: number): Promise<void> {
   await qc.invalidateQueries({ queryKey: Qk.reportSummary });
@@ -44,8 +32,6 @@ export function useRecordTransaction() {
 
   return useMutation({
     mutationFn: async (payload: OutboxTransactionPayload): Promise<RecordTransactionMutationResult> => {
-      await assertRecordingPremiumOrThrow();
-
       const net = await NetInfo.fetch();
       const maybeOfflineEnqueue = async (): Promise<RecordTransactionMutationResult> => {
         await enqueueTransaction(payload);
@@ -53,16 +39,18 @@ export function useRecordTransaction() {
         return { queued: true };
       };
 
-      if (net.isConnected === false || net.isInternetReachable === false) {
+      if (isNetInfoOffline(net)) {
         return maybeOfflineEnqueue();
       }
+
+      await assertRecordingPremiumOrThrow();
 
       try {
         const remote = await recordTransaction(payload);
         await invalidateAfterMutation(qc, payload.customer_id);
         return { queued: false, remote };
       } catch (e) {
-        if (looksOffline(e)) {
+        if (looksOfflineError(e)) {
           return maybeOfflineEnqueue();
         }
         throw e;

@@ -16,7 +16,10 @@ import { formatCalendarDateShort } from "@/lib/format-dates";
 import { useCustomer } from "@/lib/hooks/useCustomer";
 import { useDeleteCustomer, usePatchCustomer } from "@/lib/hooks/useCustomers";
 import { useDeleteCustomerLedgerTransaction } from "@/lib/hooks/useLedgerTransactionMutations";
+import { flushOutboxesNow } from "@/lib/flush-outboxes-now";
+import { outboxSyncFailureMessage, outboxSyncThrownMessage } from "@/lib/outbox-sync-user-message";
 import { useOutboxPendingForCustomer } from "@/lib/hooks/useOutboxPendingForCustomer";
+import { useOutboxSyncSummary } from "@/lib/hooks/useOutboxSyncSummary";
 import { usePremiumEntitlementBootstrapBlocksUi } from "@/lib/hooks/usePremiumEntitlementBootstrapBlocksUi";
 import { usePremiumRecordingAccess } from "@/lib/hooks/usePremiumRecordingAccess";
 import { useShopCurrency } from "@/lib/hooks/useShopCurrency";
@@ -25,6 +28,7 @@ import { formatMoneyMinor, goalProgressPaidRatio, parseRmToSen, suggestedWeeklyP
 import { apiErrorMessage } from "@/lib/api";
 import { buildInstallmentReminderMessage } from "@/lib/payment-receipt";
 import { shareCreditInvoicePdf, shareCustomerPdf, sharePaymentReceiptPdf } from "@/lib/pdf-download";
+import { isNetInfoOffline } from "@/lib/network-offline";
 import { assertRecordingPremiumOrThrow } from "@/lib/premium-recording-access";
 import { createCustomerPromise, updateCustomerPromise } from "@/lib/promise-api";
 import { cancelPromiseReminder, schedulePromiseDueReminder } from "@/lib/promise-reminders";
@@ -35,6 +39,7 @@ import { normalizePhoneForWaMe } from "@/lib/phone-wa-me";
 import { queryClient } from "@/lib/query-client";
 import { useSessionStore } from "@/stores/session-store";
 import type { CustomerLedgerTransactionApi, CustomerPromise } from "@/lib/api-types";
+import { useNetInfo } from "@react-native-community/netinfo";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery, useIsRestoring } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
@@ -123,9 +128,13 @@ export default function CustomerDetailScreen() {
 
   const currency = useShopCurrency();
   const photoUri = useCustomerPhoto(customerId);
+  const netInfo = useNetInfo();
+  const deviceOffline = isNetInfoOffline(netInfo);
   const premiumRecording = usePremiumRecordingAccess(Boolean(token));
   const premiumBootstrapBlocks = usePremiumEntitlementBootstrapBlocksUi(premiumRecording.isLoading);
   const pendingOutbox = useOutboxPendingForCustomer(customerId, Boolean(token));
+  const outboxSync = useOutboxSyncSummary(Boolean(token));
+  const [syncBusy, setSyncBusy] = useState(false);
 
   const [sheetType, setSheetType] = useState<"credit" | "payment" | null>(null);
   const [editingTx, setEditingTx] = useState<CustomerLedgerTransactionApi | null>(null);
@@ -216,6 +225,8 @@ export default function CustomerDetailScreen() {
   });
 
   const requirePremium = () => {
+    /** Offline: allow opening record sheet and queueing; subscription is checked when syncing online. */
+    if (deviceOffline) return true;
     const status = premiumRecording.data;
     if (premiumBootstrapBlocks) return false;
     if (status?.requiresPremium === true && !status.entitled) {
@@ -611,12 +622,58 @@ export default function CustomerDetailScreen() {
             ) : null}
 
             {(pendingOutbox.data ?? 0) > 0 ? (
-              <View style={[styles.syncPill, { borderColor: BakimateColors.danger }]}>
-                <Ionicons name="sync-outline" size={14} color={BakimateColors.danger} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("pending_sync_tap")}
+                disabled={syncBusy}
+                onPress={() => {
+                  setSyncBusy(true);
+                  void flushOutboxesNow()
+                    .then(async ({ flush, summary }) => {
+                      await queryClient.invalidateQueries({ queryKey: Qk.customer(customerId) });
+                      if (summary.pending > 0) {
+                        const buttons: {
+                          text: string;
+                          style?: "cancel" | "default";
+                          onPress?: () => void;
+                        }[] = [{ text: t("ok"), style: "cancel" }];
+                        if (summary.subscriptionBlocked) {
+                          buttons.unshift({
+                            text: t("paywall_title"),
+                            onPress: () => router.push("/paywall"),
+                          });
+                        }
+                        Alert.alert(t("pending_sync_still_title"), outboxSyncFailureMessage(summary), buttons);
+                        return;
+                      }
+                      if (flush.transactions.sent > 0 || flush.customers.sent > 0) {
+                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+                          () => {},
+                        );
+                      }
+                    })
+                    .catch((e: unknown) =>
+                      Alert.alert(t("error"), outboxSyncThrownMessage(e)),
+                    )
+                    .finally(() => setSyncBusy(false));
+                }}
+                style={[styles.syncPill, { borderColor: BakimateColors.danger }]}
+              >
+                {syncBusy ? (
+                  <ActivityIndicator size="small" color={BakimateColors.danger} />
+                ) : (
+                  <Ionicons name="sync-outline" size={14} color={BakimateColors.danger} />
+                )}
                 <Text style={[styles.syncText, { color: BakimateColors.danger }]}>
                   {t("pending_sync_banner", { count: pendingOutbox.data ?? 0 })}
                 </Text>
-              </View>
+              </Pressable>
+            ) : null}
+
+            {outboxSync.data?.subscriptionBlocked ? (
+              <Text style={[styles.syncHint, { color: BakimateColors.danger }]}>
+                {t("pending_sync_subscription")}
+              </Text>
             ) : null}
 
             {/* Phone + next-due compact pill row */}
@@ -1282,6 +1339,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   syncText: { fontSize: 12, fontWeight: "800" },
+  syncHint: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 18,
+  },
 
   cacheHintPill: {
     flexDirection: "row",

@@ -8,6 +8,7 @@ import { remapCustomerPhoto } from "@/lib/customer-photos";
 import { openBakimateDatabase } from "@/lib/db/bakimate-db";
 import { Qk } from "@/lib/hooks/query-keys";
 import { queryClient } from "@/lib/query-client";
+import { flushTransactionOutbox } from "@/lib/transaction-outbox";
 
 const WEB_OUTBOX_KEY = "BAKIMATE_CUSTOMER_OUTBOX_WEB_V1";
 
@@ -42,9 +43,8 @@ function shouldSupersede(e: unknown): boolean {
   if (!axios.isAxiosError(e)) {
     return false;
   }
-  const s = e.response?.status;
 
-  return s === 402 || s === 422;
+  return e.response?.status === 402;
 }
 
 function looksRetryable(e: unknown): boolean {

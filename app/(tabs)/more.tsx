@@ -16,6 +16,10 @@ import { getNativeRevenueCatApiKey } from "@/lib/revenuecat-settings";
 import { queryClient } from "@/lib/query-client";
 import { fetchShopProfile } from "@/lib/shop-api";
 import { useSessionStore } from "@/stores/session-store";
+import {
+  VOICE_STT_LOCALE_OPTIONS,
+  type VoiceSttLocalePreference,
+} from "@/lib/voice-stt-locale";
 import { useUiPreferencesStore, type ColorSchemePreference } from "@/stores/ui-preferences-store";
 import { Ionicons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -66,9 +70,15 @@ export default function MoreScreen() {
 
   const themePref = useUiPreferencesStore((s) => s.colorSchemePreference);
   const setThemePref = useUiPreferencesStore((s) => s.setColorSchemePreference);
+  const voiceSttLocale = useUiPreferencesStore((s) => s.voiceSttLocale);
+  const setVoiceSttLocale = useUiPreferencesStore((s) => s.setVoiceSttLocale);
+
+  const voiceSttLabel =
+    VOICE_STT_LOCALE_OPTIONS.find((o) => o.key === voiceSttLocale)?.labelKey ?? "voice_stt_auto";
 
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const [voiceSttPickerOpen, setVoiceSttPickerOpen] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
 
   const confirmSignOut = () => {
@@ -264,6 +274,12 @@ export default function MoreScreen() {
               isDark={isDark}
               onPress={() => setLangPickerOpen(true)}
             />
+            <PictogramTile
+              icon="mic"
+              label={t(voiceSttLabel)}
+              isDark={isDark}
+              onPress={() => setVoiceSttPickerOpen(true)}
+            />
           </View>
 
           {subscriptionLine ? (
@@ -442,6 +458,43 @@ export default function MoreScreen() {
                 onPress={() => {
                   setThemePref(opt.key);
                   setThemePickerOpen(false);
+                }}
+                style={
+                  selected
+                    ? {
+                        borderColor: BakimateColors.accentTeal,
+                        borderWidth: 2,
+                      }
+                    : undefined
+                }
+              />
+            );
+          })}
+        </View>
+      </BottomSheet>
+
+      {/* Voice STT language picker */}
+      <BottomSheet
+        visible={voiceSttPickerOpen}
+        onClose={() => setVoiceSttPickerOpen(false)}
+        isDark={isDark}
+        compact
+      >
+        <Text style={[styles.pickerTitle, { color: headline }]}>{t("voice_stt_setting")}</Text>
+        <Text style={[styles.pickerHint, { color: muted }]}>{t("voice_speak_hint")}</Text>
+        <View style={styles.pickerGrid}>
+          {VOICE_STT_LOCALE_OPTIONS.map((opt) => {
+            const selected = voiceSttLocale === opt.key;
+            return (
+              <PictogramTile
+                key={opt.key}
+                icon="mic"
+                label={t(opt.labelKey)}
+                tone={selected ? BakimateColors.accentTeal : undefined}
+                isDark={isDark}
+                onPress={() => {
+                  setVoiceSttLocale(opt.key as VoiceSttLocalePreference);
+                  setVoiceSttPickerOpen(false);
                 }}
                 style={
                   selected

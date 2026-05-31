@@ -2,6 +2,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import type { VoiceSttLocalePreference } from "@/lib/voice-stt-locale";
+
 /** How the app picks light vs dark. `system` follows the device. */
 export type ColorSchemePreference = "system" | "light" | "dark";
 
@@ -13,6 +15,9 @@ type UiPrefs = {
   /** Resolved with device appearance when `system`. */
   colorSchemePreference: ColorSchemePreference;
   setColorSchemePreference: (v: ColorSchemePreference) => void;
+  /** On-device speech recognition language for voice ledger. */
+  voiceSttLocale: VoiceSttLocalePreference;
+  setVoiceSttLocale: (v: VoiceSttLocalePreference) => void;
 };
 
 export const useUiPreferencesStore = create<UiPrefs>()(
@@ -22,6 +27,8 @@ export const useUiPreferencesStore = create<UiPrefs>()(
       setDashboardShowSecondaryReference: (dashboardShowSecondaryReference) => set({ dashboardShowSecondaryReference }),
       colorSchemePreference: "system",
       setColorSchemePreference: (colorSchemePreference) => set({ colorSchemePreference }),
+      voiceSttLocale: "auto",
+      setVoiceSttLocale: (voiceSttLocale) => set({ voiceSttLocale }),
     }),
     {
       name: "bakimate-ui-prefs-v1",
@@ -29,6 +36,7 @@ export const useUiPreferencesStore = create<UiPrefs>()(
       partialize: (s) => ({
         dashboardShowSecondaryReference: s.dashboardShowSecondaryReference,
         colorSchemePreference: s.colorSchemePreference,
+        voiceSttLocale: s.voiceSttLocale,
       }),
     },
   ),

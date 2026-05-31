@@ -18,7 +18,7 @@
         "NSContactsUsageDescription": "BakiMate suggests names and phone numbers from your contacts when you add a customer or supplier.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "2"
+      "buildNumber": "4"
     },
     "android": {
       "adaptiveIcon": {
@@ -26,9 +26,9 @@
         "foregroundImage": "./assets/images/icon.jpg"
       },
       "softwareKeyboardLayoutMode": "resize",
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.ihabimate.bakimate"
+      "package": "com.ihabimate.bakimate",
+      "versionCode": 11
     },
     "web": {
       "output": "static",

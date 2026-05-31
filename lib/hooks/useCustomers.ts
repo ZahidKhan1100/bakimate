@@ -1,24 +1,12 @@
 import NetInfo from "@react-native-community/netinfo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import axios from "axios";
 
 import { createCustomer, deleteCustomer, fetchCustomersPage, patchCustomer } from "@/lib/customers-api";
 import { enqueueCustomer, listPendingCustomerPayloads, mergePendingCustomersIntoPage } from "@/lib/customer-outbox";
 import { useAppQueriesEnabled, withOfflineQueryDisplay } from "@/lib/hooks/useAppQueriesEnabled";
+import { isNetInfoOffline, looksOfflineError } from "@/lib/network-offline";
 
 import { Qk } from "@/lib/hooks/query-keys";
-
-function looksOffline(e: unknown): boolean {
-  if (axios.isAxiosError(e)) {
-    if (e.code === "ERR_NETWORK" || !e.response) {
-      return true;
-    }
-  }
-  const msg =
-    typeof e === "object" && e !== null && "message" in e ? String((e as { message?: unknown }).message) : "";
-
-  return /network/i.test(msg);
-}
 
 export function useCustomersPage(page = 1, options?: { enabled?: boolean }) {
   const enabled = useAppQueriesEnabled(options?.enabled ?? true);
@@ -61,7 +49,7 @@ export function useCreateCustomer() {
         return { queued: true, customer };
       };
 
-      if (net.isConnected === false || net.isInternetReachable === false) {
+      if (isNetInfoOffline(net)) {
         return queueOffline();
       }
 
@@ -70,7 +58,7 @@ export function useCreateCustomer() {
 
         return { queued: false, customer };
       } catch (e) {
-        if (looksOffline(e)) {
+        if (looksOfflineError(e)) {
           return queueOffline();
         }
         throw e;
