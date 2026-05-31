@@ -28,6 +28,10 @@ import {
 } from "@/lib/voice-ledger-parse-api";
 import { resolveVoiceQuickItem } from "@/lib/match-voice-quick-item";
 import {
+  isVoiceParseAcceptable,
+  normalizeVoiceLedgerParse,
+} from "@/lib/normalize-voice-ledger-parse";
+import {
   buildVoiceContextualStrings,
   resolveVoiceSttBcp47,
 } from "@/lib/voice-stt-locale";
@@ -166,14 +170,18 @@ export function RecordTransactionSheet({
   }, [visible, editingId]);
 
   const sttLocale = resolveVoiceSttBcp47(voiceSttPref, i18n.language);
+  const intentHint: "credit" | "payment" =
+    mode === "credit" ? "credit" : mode === "payment" ? "payment" : "payment";
   const contextualStrings = useMemo(
     () =>
       buildVoiceContextualStrings({
         customerName: customer.name,
         quickItems,
         currencyCode: currency,
+        intentHint:
+          mode === "credit" ? "credit" : mode === "payment" ? "payment" : undefined,
       }),
-    [customer.name, quickItems, currency],
+    [customer.name, quickItems, currency, mode],
   );
 
   const { speechAvailable, listening, interimTranscript, listenOnce, cancelListening } =
@@ -225,10 +233,10 @@ export function RecordTransactionSheet({
     setVoiceParsing(true);
 
     try {
-      const parsed = await parseVoiceLedger(
+      const raw = await parseVoiceLedger(
         {
           transcript: trimmed,
-          intent_hint: mode === "credit" ? "credit" : "payment",
+          intent_hint: intentHint,
           currency_code: currency,
           customer_name: customer.name,
           quick_items: quickItems,
@@ -241,16 +249,14 @@ export function RecordTransactionSheet({
         return;
       }
 
-      if (parsed.error_code === "gemini_not_configured") {
+      if (raw.error_code === "gemini_not_configured") {
         Alert.alert(t("error"), t("voice_gemini_not_configured"));
         return;
       }
 
-      if (
-        parsed.amount_sen == null ||
-        parsed.amount_sen <= 0 ||
-        parsed.confidence === "low"
-      ) {
+      const parsed = normalizeVoiceLedgerParse(raw, intentHint, trimmed, currency);
+
+      if (!isVoiceParseAcceptable(parsed, intentHint)) {
         Alert.alert(t("voice_parse_low_confidence_title"), t("voice_parse_low_confidence_body"));
         return;
       }
@@ -267,6 +273,7 @@ export function RecordTransactionSheet({
 
       setVoiceConfirm({
         ...parsed,
+        type: intentHint,
         item_key: resolvedItem,
       });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -281,7 +288,7 @@ export function RecordTransactionSheet({
         setVoiceParsing(false);
       }
     }
-  }, [currency, customer.name, i18n.language, isEditing, listenOnce, mode, quickItems, t]);
+  }, [currency, customer.name, i18n.language, intentHint, isEditing, listenOnce, mode, quickItems, t]);
 
   const applyVoiceConfirm = useCallback(() => {
     if (!voiceConfirm?.amount_sen || voiceConfirm.amount_sen <= 0) {
@@ -291,15 +298,17 @@ export function RecordTransactionSheet({
     if (voiceConfirm.note?.trim()) {
       setNote(voiceConfirm.note.trim());
     }
-    if (voiceConfirm.next_due_at) {
-      setNextDue(voiceConfirm.next_due_at);
-    }
-    if (voiceConfirm.item_key) {
-      setSelectedQuickItem(voiceConfirm.item_key);
+    if (mode === "credit") {
+      if (voiceConfirm.next_due_at) {
+        setNextDue(voiceConfirm.next_due_at);
+      }
+      if (voiceConfirm.item_key) {
+        setSelectedQuickItem(voiceConfirm.item_key);
+      }
     }
     setVoiceConfirm(null);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-  }, [voiceConfirm]);
+  }, [mode, voiceConfirm]);
 
   if (!mode) return null;
 
@@ -582,7 +591,9 @@ export function RecordTransactionSheet({
                   {interimTranscript.trim() ||
                     (isCredit && quickItems.length > 0
                       ? t("voice_speak_hint_credit")
-                      : t("voice_speak_hint"))}
+                      : !isCredit
+                        ? t("voice_speak_hint_payment")
+                        : t("voice_speak_hint"))}
                 </Text>
               </View>
             </Pressable>

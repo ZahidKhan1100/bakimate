@@ -1,5 +1,6 @@
 import { AddCustomerSheet } from "@/components/add-customer-sheet";
 import { EmptyHero } from "@/components/ui/empty-hero";
+import { ListSearchBar } from "@/components/ui/list-search-bar";
 import { MeshBackdrop } from "@/components/ui/mesh-backdrop";
 import { PersonRow } from "@/components/ui/person-row";
 import { ScreenHeroHeader } from "@/components/ui/screen-hero-header";
@@ -9,6 +10,7 @@ import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import type { Customer } from "@/lib/api-types";
 import { clearCustomerPhoto } from "@/lib/customer-photos";
+import { filterCustomers } from "@/lib/filter-customers";
 import { useCustomersPage, useDeleteCustomer } from "@/lib/hooks/useCustomers";
 import { useShopCurrency } from "@/lib/hooks/useShopCurrency";
 import { shareCustomerReceipt } from "@/lib/share-receipt";
@@ -19,7 +21,7 @@ import { FlashList } from "@shopify/flash-list";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -49,6 +51,14 @@ export default function CustomersScreen() {
   const deleteMut = useDeleteCustomer();
 
   const [addOpen, setAddOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const rows = data?.data ?? [];
+  const filteredRows = useMemo(
+    () => filterCustomers(rows, searchQuery),
+    [rows, searchQuery],
+  );
+  const isSearching = searchQuery.trim().length > 0;
 
   const onLongPress = (item: Customer) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -106,8 +116,6 @@ export default function CustomersScreen() {
     );
   }
 
-  const rows = data?.data ?? [];
-
   return (
     <View style={styles.flex}>
       <MeshBackdrop isDark={isDark} />
@@ -136,11 +144,23 @@ export default function CustomersScreen() {
                   { color: isDark ? BakimateColors.accentTeal : BakimateColors.primary },
                 ]}
               >
-                {rows.length}
+                {isSearching ? filteredRows.length : rows.length}
               </Text>
             </View>
           }
         />
+
+        {rows.length > 0 ? (
+          <ListSearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={t("customers_search_placeholder")}
+            isDark={isDark}
+            headlineColor={headline}
+            mutedColor={muted}
+            accessibilityLabel={t("customers_search_placeholder")}
+          />
+        ) : null}
 
         {isLoading ? (
           <ActivityIndicator style={{ marginTop: 12 }} color={BakimateColors.accentTeal} />
@@ -149,7 +169,7 @@ export default function CustomersScreen() {
         ) : (
           <View style={styles.listWrap}>
             <FlashList
-              data={rows}
+              data={filteredRows}
               keyExtractor={(item) => String(item.id)}
               refreshControl={
                 <RefreshControl
@@ -160,13 +180,22 @@ export default function CustomersScreen() {
               }
               contentContainerStyle={{ paddingBottom: listPaddingBottom }}
               ListEmptyComponent={
-                <EmptyHero
-                  icon="people"
-                  title={t("customers_empty")}
-                  body={t("add_customer")}
-                  isDark={isDark}
-                  pointer="down-right"
-                />
+                isSearching && rows.length > 0 ? (
+                  <EmptyHero
+                    icon="search"
+                    title={t("customers_search_empty_title")}
+                    body={t("customers_search_empty_body")}
+                    isDark={isDark}
+                  />
+                ) : (
+                  <EmptyHero
+                    icon="people"
+                    title={t("customers_empty")}
+                    body={t("add_customer")}
+                    isDark={isDark}
+                    pointer="down-right"
+                  />
+                )
               }
               renderItem={({ item }) => (
                 <PersonRow

@@ -31,6 +31,7 @@ export function buildVoiceContextualStrings(params: {
   customerName: string;
   quickItems: string[];
   currencyCode: string;
+  intentHint?: "credit" | "payment";
 }): string[] {
   const out = new Set<string>();
   const add = (s: string) => {
@@ -44,11 +45,24 @@ export function buildVoiceContextualStrings(params: {
   add("credit");
   add("payment");
   add("paid");
+  add("got paid");
+  add("received");
   add("hutang");
   add("bayar");
+  add("bayaran");
+  add("terima");
   add("wusool");
+  add("wasool");
+  add("liya");
+  add("mila");
+  add("cash");
+  add("collect");
   add("de");
   add("li");
+  add("sau");
+  add("hundred");
+  add("lima ratus");
+  add("tiga ratus");
   add("RM");
   add("PKR");
   add("beras");
@@ -58,9 +72,11 @@ export function buildVoiceContextualStrings(params: {
   add("fridge");
   add("grocery");
 
-  for (const item of params.quickItems) {
-    add(item);
+  if (params.intentHint !== "payment") {
+    for (const item of params.quickItems) {
+      add(item);
+    }
   }
 
-  return [...out].slice(0, 40);
+  return [...out].slice(0, 48);
 }
