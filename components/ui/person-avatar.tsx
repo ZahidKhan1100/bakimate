@@ -2,7 +2,8 @@ import { initialFromName, nameToSwatch } from "@/lib/avatar-color";
 import { useCustomerPhoto } from "@/lib/customer-photos";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { Text } from "@/components/ui/text";
 
 type Size = "sm" | "md" | "lg" | "xl";
 type Kind = "customer" | "supplier";

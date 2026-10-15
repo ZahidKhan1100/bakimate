@@ -1,7 +1,7 @@
 import type { PurchasesPackage } from "react-native-purchases";
 
 /** Free trial length — configure matching intro offer / free trial in App Store Connect + Play Console + RevenueCat. */
-export const MEMBERSHIP_TRIAL_DAYS = 30;
+export const MEMBERSHIP_TRIAL_DAYS = 90;
 
 /**
  * Target US pricing (merchant reference). Actual paid amount is whatever you set in

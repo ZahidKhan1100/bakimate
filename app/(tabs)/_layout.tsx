@@ -7,18 +7,27 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { URDU_FONT_FAMILIES } from "@/components/ui/text";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
-type IconName = "house.fill" | "chart.bar.fill" | "person.2.fill" | "shippingbox.fill" | "person.fill";
+type IconName = "house.fill" | "chart.bar.fill" | "person.2.fill" | "shippingbox.fill" | "gearshape.fill";
 
 type TabIconProps = { focused: boolean; color: string; name: IconName; isDark: boolean };
 
 function TabIcon({ focused, color, name, isDark }: TabIconProps) {
   const pillStyle: ViewStyle = focused
     ? {
-        backgroundColor: isDark ? "rgba(46, 196, 182, 0.22)" : "rgba(46, 196, 182, 0.18)",
+        backgroundColor: isDark ? "rgba(46, 196, 182, 0.3)" : "rgba(46, 196, 182, 0.2)",
+        ...(Platform.OS === "ios" && isDark
+          ? {
+              shadowColor: "#2EC4B6",
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.55,
+              shadowRadius: 10,
+            }
+          : {}),
       }
     : {};
   return (
@@ -32,25 +41,36 @@ export default function TabLayout() {
   const colorScheme = useColorScheme();
   const theme = colorScheme === "dark" ? "dark" : "light";
   const isDark = theme === "dark";
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  /** Tab labels are drawn by React Navigation, not components/ui/text — give Urdu its font and room here. */
+  const isUrdu = i18n.language.startsWith("ur");
   const insets = useSafeAreaInsets();
   /** Clear system nav buttons / gesture indicator (many Android builds report inset 0). */
   const homeBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 28) : insets.bottom;
   /** Cushion above the OS chrome so icons/labels aren’t cramped. */
   const bottomPad = homeBottomInset + (Platform.OS === "ios" ? 8 : 10);
-  const tabBarInnerHeight = Platform.OS === "ios" ? 60 : 58;
+  const tabBarInnerHeight = (Platform.OS === "ios" ? 60 : 58) + (isUrdu ? 8 : 0);
 
   const tabBarBg = () =>
     Platform.OS === "ios" ? (
-      <BlurView intensity={isDark ? 70 : 82} tint={isDark ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+      <BlurView intensity={isDark ? 82 : 90} tint={isDark ? "dark" : "light"} style={StyleSheet.absoluteFill}>
+        <View
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            backgroundColor: isDark ? "rgba(7, 16, 31, 0.55)" : "rgba(255,255,255,0.18)",
+            borderTopWidth: 1,
+            borderTopColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.08)",
+          }}
+        />
+      </BlurView>
     ) : (
       <View
         style={[
           StyleSheet.absoluteFillObject,
           {
-            backgroundColor: isDark ? "rgba(15, 23, 42, 0.94)" : "rgba(255, 255, 255, 0.93)",
-            borderTopWidth: StyleSheet.hairlineWidth,
-            borderTopColor: isDark ? BakimateColors.glassBorderDark : BakimateColors.border,
+            backgroundColor: isDark ? "rgba(7, 14, 30, 0.96)" : "rgba(255, 255, 255, 0.95)",
+            borderTopWidth: 1,
+            borderTopColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.08)",
           },
         ]}
       />
@@ -76,9 +96,10 @@ export default function TabLayout() {
         tabBarBackground: tabBarBg,
         tabBarLabelStyle: {
           fontWeight: "800",
-          fontSize: 11,
+          fontSize: 13,
           marginBottom: 0,
           marginTop: Platform.OS === "android" ? 2 : 0,
+          ...(isUrdu ? { fontFamily: URDU_FONT_FAMILIES.bold, fontWeight: "normal", lineHeight: 22 } : null),
         },
         tabBarItemStyle: { paddingTop: Platform.OS === "ios" ? 6 : 4 },
       }}>
@@ -95,9 +116,8 @@ export default function TabLayout() {
         name="insights"
         options={{
           title: t("tab_insights"),
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon focused={focused} color={color} name="chart.bar.fill" isDark={isDark} />
-          ),
+          /** Off the tab bar (4 tabs is easier to learn); opened from the Home "Weekly report" button. */
+          href: null,
         }}
       />
       <Tabs.Screen
@@ -123,7 +143,7 @@ export default function TabLayout() {
         options={{
           title: t("tab_more"),
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon focused={focused} color={color} name="person.fill" isDark={isDark} />
+            <TabIcon focused={focused} color={color} name="gearshape.fill" isDark={isDark} />
           ),
         }}
       />

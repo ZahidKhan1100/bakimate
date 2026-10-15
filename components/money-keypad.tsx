@@ -1,5 +1,6 @@
 import { BakimateColors } from "@/constants/bakimate-theme";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Text } from "@/components/ui/text";
 
 type Props = {
   valueSen: number;

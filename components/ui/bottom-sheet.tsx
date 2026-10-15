@@ -56,7 +56,7 @@ export function BottomSheet({
 
   /** Modal + KAV: avoid double-counting bottom inset when keyboard opens (iOS gray/black strip). */
   const keyboardVerticalOffset = 0;
-  const sheetBg = isDark ? "rgba(15, 23, 42, 0.98)" : "rgba(255, 255, 255, 0.99)";
+  const sheetBg = isDark ? "rgba(8, 14, 34, 0.99)" : "rgba(255, 255, 255, 0.99)";
   const bottomPad = 18 + insets.bottom;
 
   return (
@@ -90,7 +90,7 @@ export function BottomSheet({
                 contentStyle,
               ]}
             >
-              <View style={styles.grabber} />
+              <View style={[styles.grabber, { backgroundColor: isDark ? "rgba(46, 196, 182, 0.45)" : "rgba(15, 23, 42, 0.14)" }]} />
               {scrollable ? (
                 <ScrollView
                   style={styles.scrollFlex}
@@ -115,7 +115,7 @@ export function BottomSheet({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "rgba(6, 12, 24, 0.55)",
+    backgroundColor: "rgba(3, 7, 18, 0.76)",
   },
   /** Fill width + height so keyboard padding lifts the sheet from the bottom without a gap above the keyboard. */
   kavFill: {
@@ -138,10 +138,9 @@ const styles = StyleSheet.create({
   },
   grabber: {
     alignSelf: "center",
-    width: 44,
-    height: 5,
+    width: 40,
+    height: 4,
     borderRadius: 999,
-    backgroundColor: "rgba(15, 23, 42, 0.18)",
     marginTop: 10,
     marginBottom: 4,
   },

@@ -1,4 +1,11 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native";
+import {
+  NotoNaskhArabic_400Regular,
+  NotoNaskhArabic_500Medium,
+  NotoNaskhArabic_600SemiBold,
+  NotoNaskhArabic_700Bold,
+} from "@expo-google-fonts/noto-naskh-arabic";
+import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -29,6 +36,14 @@ function NavigationRoot() {
   const token = useSessionStore((s) => s.token);
   const segments = useSegments();
   const router = useRouter();
+  /** Urdu labels use these (see components/ui/text.tsx); a load error still lets the app open with system fonts. */
+  const [fontsLoaded, fontError] = useFonts({
+    NotoNaskhArabic_400Regular,
+    NotoNaskhArabic_500Medium,
+    NotoNaskhArabic_600SemiBold,
+    NotoNaskhArabic_700Bold,
+  });
+  const fontsReady = fontsLoaded || fontError != null;
 
   const publicAuthRoutes = useMemo(
     () =>
@@ -46,7 +61,7 @@ function NavigationRoot() {
   const atPublicAuth = segments[0] != null && publicAuthRoutes.has(String(segments[0]));
 
   useEffect(() => {
-    if (!hydrated) {
+    if (!hydrated || !fontsReady) {
       return;
     }
     void SplashScreen.hideAsync();
@@ -58,7 +73,7 @@ function NavigationRoot() {
     if (token && atPublicAuth) {
       router.replace("/(tabs)");
     }
-  }, [hydrated, token, router, segments[0]]);
+  }, [hydrated, fontsReady, token, router, segments[0]]);
 
   const navTheme =
     colorScheme === "dark"
@@ -85,7 +100,7 @@ function NavigationRoot() {
           },
         };
 
-  if (!hydrated) {
+  if (!hydrated || !fontsReady) {
     return null;
   }
 

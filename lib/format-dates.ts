@@ -1,3 +1,10 @@
+/** BCP-47 locale for Intl date/number formatting from the i18next language. */
+export function intlLocaleFor(i18nLanguage: string): string {
+  if (i18nLanguage.startsWith("ur")) return "ur-PK";
+  if (i18nLanguage.startsWith("ms")) return "ms-MY";
+  return "en-MY";
+}
+
 /**
  * Parse API date strings (YYYY-MM-DD prefix or full ISO) as a **local calendar** date.
  * Avoids `new Date("YYYY-MM-DD")` UTC midnight shifts.
@@ -27,7 +34,7 @@ export function formatChartWeekdayLabel(value: string | null | undefined, i18nLa
   if (!d) {
     return "—";
   }
-  const loc = i18nLanguage.startsWith("ms") ? "ms-MY" : "en-MY";
+  const loc = intlLocaleFor(i18nLanguage);
   try {
     return new Intl.DateTimeFormat(loc, { weekday: "short" }).format(d);
   } catch {
@@ -41,7 +48,7 @@ export function formatCalendarDateShort(value: string | null | undefined, i18nLa
   if (!d) {
     return value != null && String(value).trim() !== "" ? String(value).trim() : "—";
   }
-  const loc = i18nLanguage.startsWith("ms") ? "ms-MY" : "en-MY";
+  const loc = intlLocaleFor(i18nLanguage);
   try {
     return new Intl.DateTimeFormat(loc, {
       day: "numeric",

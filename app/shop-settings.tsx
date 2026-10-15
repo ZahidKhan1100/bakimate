@@ -8,7 +8,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "@/components/ui/text";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const BOTTOM_PAD = Platform.OS === "ios" ? 36 : 28;

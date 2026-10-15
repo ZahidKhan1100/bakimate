@@ -3,6 +3,7 @@ import type {
   LaravelPaginator,
   Supplier,
   SupplierDetail,
+  SupplierLedgerTransactionApi,
   SupplierTransactionCreated,
 } from "@/lib/api-types";
 
@@ -25,11 +26,34 @@ export async function deleteSupplier(id: number): Promise<void> {
   await api.delete(`/suppliers/${id}`);
 }
 
+export type SupplierLedgerResponse = {
+  supplier_id: number;
+  month: string | null;
+  transactions: SupplierLedgerTransactionApi[];
+  totals: {
+    purchases_sen: number;
+    payments_out_sen: number;
+  };
+};
+
+export async function fetchSupplierLedger(
+  supplierId: number,
+  month?: string | null,
+): Promise<SupplierLedgerResponse> {
+  const params = month ? { month } : undefined;
+  const { data } = await api.get<SupplierLedgerResponse>(
+    `/suppliers/${supplierId}/transactions`,
+    { params },
+  );
+  return data;
+}
+
 export async function recordSupplierLedgerEntry(payload: {
   supplier_id: number;
   amount_sen: number;
   type: "purchase" | "payment_out";
   note?: string | null;
+  recorded_at?: string | null;
 }): Promise<SupplierTransactionCreated> {
   const { data } = await api.post("/supplier-transactions", payload);
   return data;

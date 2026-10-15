@@ -5,18 +5,29 @@ import { PersonAvatar } from "@/components/ui/person-avatar";
 import { PictogramTile } from "@/components/ui/pictogram-tile";
 import { ScreenHeroHeader } from "@/components/ui/screen-hero-header";
 import { BakimateColors } from "@/constants/bakimate-theme";
-import { getPrivacyPolicyUrl, getTermsOfUseUrl, getWebsiteBaseUrl } from "@/constants/site";
+import {
+  getAppStoreReviewUrl,
+  getAppStoreUrl,
+  getGooglePlayUrl,
+  getPrivacyPolicyUrl,
+  getTermsOfUseUrl,
+  getWebsiteBaseUrl,
+} from "@/constants/site";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { authApiErrorMessage, deleteAuthenticatedAccount } from "@/lib/auth-api";
 import { formatSubscriptionExpiryDateTime } from "@/lib/format-subscription-expiry";
 import { Qk } from "@/lib/hooks/query-keys";
 import { usePremiumRecordingAccess } from "@/lib/hooks/usePremiumRecordingAccess";
+import { VOICE_ENABLED } from "@/lib/feature-flags";
+import { APP_LANGUAGES, type AppLanguage } from "@/lib/i18n";
+import { MONETIZATION_ENABLED } from "@/lib/monetization";
 import { getNativeRevenueCatApiKey } from "@/lib/revenuecat-settings";
 import { queryClient } from "@/lib/query-client";
 import { fetchShopProfile } from "@/lib/shop-api";
 import { useSessionStore } from "@/stores/session-store";
 import {
+  sanitizeVoiceSttLocale,
   VOICE_STT_LOCALE_OPTIONS,
   type VoiceSttLocalePreference,
 } from "@/lib/voice-stt-locale";
@@ -35,11 +46,15 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import { Text } from "@/components/ui/text";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+/** Each language named in its own script so users can find it whatever the current language is. */
+const LANGUAGE_NAMES: Record<AppLanguage, string> = { en: "English", ms: "Bahasa Melayu", ur: "اردو" };
 
 export default function MoreScreen() {
   const { t, i18n } = useTranslation();
@@ -70,16 +85,32 @@ export default function MoreScreen() {
 
   const themePref = useUiPreferencesStore((s) => s.colorSchemePreference);
   const setThemePref = useUiPreferencesStore((s) => s.setColorSchemePreference);
-  const voiceSttLocale = useUiPreferencesStore((s) => s.voiceSttLocale);
+  const voiceSttLocaleRaw = useUiPreferencesStore((s) => s.voiceSttLocale);
   const setVoiceSttLocale = useUiPreferencesStore((s) => s.setVoiceSttLocale);
+  const voiceSttLocale = sanitizeVoiceSttLocale(voiceSttLocaleRaw);
 
   const voiceSttLabel =
     VOICE_STT_LOCALE_OPTIONS.find((o) => o.key === voiceSttLocale)?.labelKey ?? "voice_stt_auto";
 
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const setAppLanguage = useUiPreferencesStore((s) => s.setAppLanguage);
   const [voiceSttPickerOpen, setVoiceSttPickerOpen] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
+
+  const rateUrl = Platform.OS === "ios" ? getAppStoreReviewUrl() : getGooglePlayUrl();
+
+  const onRateApp = () => {
+    void Linking.openURL(rateUrl).catch(() =>
+      Alert.alert(t("error"), t("share_failed_title")),
+    );
+  };
+
+  /** The person receiving the share may be on either platform, so the message carries both store links. */
+  const onShareApp = () => {
+    const message = t("share_app_message", { android: getGooglePlayUrl(), ios: getAppStoreUrl() });
+    void Share.share({ message }).catch(() => {});
+  };
 
   const confirmSignOut = () => {
     Alert.alert(t("sign_out"), undefined, [
@@ -217,7 +248,7 @@ export default function MoreScreen() {
                 <Text style={[styles.identityEmail, { color: muted }]} numberOfLines={1}>
                   {user.email}
                 </Text>
-                {hasPremiumAccess ? (
+                {!MONETIZATION_ENABLED ? null : hasPremiumAccess ? (
                   <View style={styles.proPill}>
                     <Ionicons name="diamond" size={12} color={BakimateColors.accentTeal} />
                     <Text style={styles.proPillText}>{t("more_pro_badge_label")}</Text>
@@ -237,13 +268,15 @@ export default function MoreScreen() {
               isDark={isDark}
               onPress={() => router.push("/shop-settings")}
             />
-            <PictogramTile
-              icon={hasPremiumAccess ? "diamond" : "diamond-outline"}
-              label={t("paywall_title")}
-              tone={hasPremiumAccess ? BakimateColors.success : "#FBBF24"}
-              isDark={isDark}
-              onPress={() => router.push("/paywall")}
-            />
+            {MONETIZATION_ENABLED ? (
+              <PictogramTile
+                icon={hasPremiumAccess ? "diamond" : "diamond-outline"}
+                label={t("paywall_title")}
+                tone={hasPremiumAccess ? BakimateColors.success : "#FBBF24"}
+                isDark={isDark}
+                onPress={() => router.push("/paywall")}
+              />
+            ) : null}
           </View>
 
           <Text style={[styles.sectionLabel, styles.sectionLabelSpaced, { color: muted }]}>
@@ -270,19 +303,21 @@ export default function MoreScreen() {
             />
             <PictogramTile
               icon="language"
-              label={i18n.language.startsWith("ms") ? t("lang_ms") : t("lang_en")}
+              label={LANGUAGE_NAMES[APP_LANGUAGES.find((l) => i18n.language.startsWith(l)) ?? "en"]}
               isDark={isDark}
               onPress={() => setLangPickerOpen(true)}
             />
-            <PictogramTile
-              icon="mic"
-              label={t(voiceSttLabel)}
-              isDark={isDark}
-              onPress={() => setVoiceSttPickerOpen(true)}
-            />
+            {VOICE_ENABLED ? (
+              <PictogramTile
+                icon="mic"
+                label={t(voiceSttLabel)}
+                isDark={isDark}
+                onPress={() => setVoiceSttPickerOpen(true)}
+              />
+            ) : null}
           </View>
 
-          {subscriptionLine ? (
+          {MONETIZATION_ENABLED && subscriptionLine ? (
             <>
               <Text style={[styles.sectionLabel, styles.sectionLabelSpaced, { color: muted }]}>
                 {t("more_section_plan")}
@@ -316,6 +351,41 @@ export default function MoreScreen() {
           ) : null}
 
           <Text style={[styles.sectionLabel, styles.sectionLabelSpaced, { color: muted }]}>
+            {t("more_section_share")}
+          </Text>
+          <GlassSurface isDark={isDark} style={styles.legalGlass} contentStyle={styles.legalInner}>
+            <Text style={[styles.deleteAccountBody, { color: muted }]}>
+              {t("more_share_hint")}
+            </Text>
+            <View style={styles.legalLinkRow}>
+              <Pressable
+                onPress={onShareApp}
+                accessibilityRole="button"
+                accessibilityLabel={t("share_app_cta")}
+                style={({ pressed }) => [styles.legalLinkBtn, { opacity: pressed ? 0.75 : 1 }]}
+              >
+                <Ionicons name="share-social-outline" size={18} color={BakimateColors.accentTeal} />
+                <Text style={[styles.legalLinkText, { color: BakimateColors.accentTeal }]}>
+                  {t("share_app_cta")}
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color={BakimateColors.accentTeal} />
+              </Pressable>
+              <Pressable
+                onPress={onRateApp}
+                accessibilityRole="link"
+                accessibilityLabel={t("rate_app_cta")}
+                style={({ pressed }) => [styles.legalLinkBtn, { opacity: pressed ? 0.75 : 1 }]}
+              >
+                <Ionicons name="star-outline" size={18} color={BakimateColors.accentTeal} />
+                <Text style={[styles.legalLinkText, { color: BakimateColors.accentTeal }]}>
+                  {t("rate_app_cta")}
+                </Text>
+                <Ionicons name="open-outline" size={16} color={BakimateColors.accentTeal} />
+              </Pressable>
+            </View>
+          </GlassSurface>
+
+          <Text style={[styles.sectionLabel, styles.sectionLabelSpaced, { color: muted }]}>
             {t("more_section_legal")}
           </Text>
           <GlassSurface isDark={isDark} style={styles.legalGlass} contentStyle={styles.legalInner}>
@@ -345,66 +415,20 @@ export default function MoreScreen() {
                 </Text>
                 <Ionicons name="open-outline" size={16} color={BakimateColors.accentTeal} />
               </Pressable>
-            </View>
-          </GlassSurface>
-          <GlassSurface
-            isDark={isDark}
-            style={[
-              styles.deleteGlass,
-              { borderColor: isDark ? "rgba(248, 113, 113, 0.35)" : "rgba(220, 38, 38, 0.28)" },
-            ]}
-            contentStyle={styles.deleteInner}
-          >
-            <View
-              style={[
-                styles.deleteIconBubble,
-                {
-                  borderColor: BakimateColors.danger + "55",
-                  backgroundColor: BakimateColors.danger + "12",
-                },
-              ]}
-            >
-              <Ionicons name="trash-outline" size={22} color={BakimateColors.danger} />
-            </View>
-            <View style={styles.deleteCopy}>
-              <Text style={[styles.deleteAccountTitle, { color: headline }]}>
-                {t("account_delete_section_title")}
-              </Text>
-              <Text style={[styles.deleteAccountBody, { color: muted }]}>
-                {t("account_delete_section_body")}
-              </Text>
-              <Pressable
-                onPress={confirmDeleteAccount}
-                disabled={deleteAccountBusy}
-                accessibilityRole="button"
-                accessibilityLabel={t("account_delete_execute")}
-                style={({ pressed }) => [
-                  styles.deletePrimaryBtn,
-                  {
-                    opacity: deleteAccountBusy ? 0.55 : pressed ? 0.92 : 1,
-                    backgroundColor: BakimateColors.danger,
-                  },
-                ]}
-              >
-                <Ionicons name="trash" size={20} color="#fff" />
-                <Text style={styles.deletePrimaryBtnText}>{t("account_delete_execute")}</Text>
-              </Pressable>
               <Pressable
                 onPress={() => void Linking.openURL(`${getWebsiteBaseUrl()}/delete-account`)}
-                disabled={deleteAccountBusy}
-                style={({ pressed }) => [
-                  styles.deleteAccountBtn,
-                  { opacity: pressed || deleteAccountBusy ? 0.75 : 1, borderColor: BakimateColors.danger },
-                ]}
+                accessibilityRole="link"
+                accessibilityLabel={t("account_delete_open_site")}
+                style={({ pressed }) => [styles.legalLinkBtn, { opacity: pressed ? 0.75 : 1 }]}
               >
-                <Text style={[styles.deleteAccountBtnText, { color: BakimateColors.danger }]}>
+                <Ionicons name="trash-outline" size={18} color={BakimateColors.accentTeal} />
+                <Text style={[styles.legalLinkText, { color: BakimateColors.accentTeal }]}>
                   {t("account_delete_open_site")}
                 </Text>
-                <Ionicons name="open-outline" size={18} color={BakimateColors.danger} />
+                <Ionicons name="open-outline" size={16} color={BakimateColors.accentTeal} />
               </Pressable>
             </View>
           </GlassSurface>
-
           <Text style={[styles.sectionLabel, styles.sectionLabelSpaced, { color: muted }]}>
             {t("more_section_session")}
           </Text>
@@ -412,7 +436,11 @@ export default function MoreScreen() {
             onPress={confirmSignOut}
             accessibilityRole="button"
             accessibilityLabel={t("sign_out")}
-            style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+            style={({ pressed }) => [
+              styles.sessionRowPress,
+              styles.sessionRowPressLast,
+              { opacity: pressed ? 0.92 : 1 },
+            ]}
           >
             <GlassSurface isDark={isDark} style={styles.signOutGlass} contentStyle={styles.signOutInner}>
               <View style={styles.signOutLeft}>
@@ -431,6 +459,19 @@ export default function MoreScreen() {
               </View>
               <Ionicons name="chevron-forward" size={22} color={muted} />
             </GlassSurface>
+          </Pressable>
+          <Pressable
+            onPress={confirmDeleteAccount}
+            disabled={deleteAccountBusy}
+            accessibilityRole="button"
+            accessibilityLabel={t("account_delete_execute")}
+            hitSlop={8}
+            style={({ pressed }) => [styles.deleteLink, { opacity: deleteAccountBusy ? 0.55 : pressed ? 0.7 : 1 }]}
+          >
+            <Ionicons name="trash-outline" size={16} color={BakimateColors.danger} />
+            <Text style={[styles.deleteLinkText, { color: BakimateColors.danger }]}>
+              {t("account_delete_execute")}
+            </Text>
           </Pressable>
         </ScrollView>
       </SafeAreaView>
@@ -514,12 +555,7 @@ export default function MoreScreen() {
       <BottomSheet visible={langPickerOpen} onClose={() => setLangPickerOpen(false)} isDark={isDark} compact>
         <Text style={[styles.pickerTitle, { color: headline }]}>{t("language")}</Text>
         <View style={styles.pickerGrid}>
-          {(
-            [
-              { code: "en", label: t("lang_en") },
-              { code: "ms", label: t("lang_ms") },
-            ]
-          ).map((opt) => {
+          {APP_LANGUAGES.map((code) => ({ code, label: LANGUAGE_NAMES[code] })).map((opt) => {
             const selected = i18n.language.startsWith(opt.code);
             return (
               <PictogramTile
@@ -529,7 +565,7 @@ export default function MoreScreen() {
                 tone={selected ? BakimateColors.accentTeal : undefined}
                 isDark={isDark}
                 onPress={() => {
-                  void i18n.changeLanguage(opt.code);
+                  setAppLanguage(opt.code);
                   setLangPickerOpen(false);
                 }}
                 style={
@@ -550,6 +586,8 @@ export default function MoreScreen() {
 }
 
 const styles = StyleSheet.create({
+  deleteLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, marginBottom: 8 },
+  deleteLinkText: { fontSize: 14, fontWeight: "700" },
   flex: { flex: 1 },
   deleteBusyOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -588,7 +626,7 @@ const styles = StyleSheet.create({
   identityTextCol: { flex: 1, minWidth: 0 },
   identityName: { fontSize: 19, fontWeight: "900", letterSpacing: -0.3 },
   identityEmail: { marginTop: 3, fontSize: 13, fontWeight: "700" },
-  identityHint: { marginTop: 8, fontSize: 12, fontWeight: "700", lineHeight: 17 },
+  identityHint: { marginTop: 8, fontSize: 14, fontWeight: "700", lineHeight: 17 },
   proPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -600,10 +638,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "rgba(46, 196, 182, 0.16)",
   },
-  proPillText: { fontWeight: "900", fontSize: 11, color: BakimateColors.accentTeal },
+  proPillText: { fontWeight: "900", fontSize: 13, color: BakimateColors.accentTeal },
 
   sectionLabel: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "900",
     letterSpacing: 2,
     textTransform: "uppercase",
@@ -622,7 +660,9 @@ const styles = StyleSheet.create({
   },
   statusText: { flex: 1, fontWeight: "800", fontSize: 13, lineHeight: 19 },
 
-  signOutGlass: { marginBottom: 14 },
+  sessionRowPress: { marginBottom: 10 },
+  sessionRowPressLast: { marginBottom: 14 },
+  signOutGlass: { marginBottom: 0 },
   signOutInner: {
     flexDirection: "row",
     alignItems: "center",
@@ -651,51 +691,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   legalLinkText: { flex: 1, fontWeight: "800", fontSize: 15 },
-  deleteGlass: { marginBottom: 12 },
-  deleteInner: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 14,
-    padding: 18,
-  },
-  deleteIconBubble: {
-    width: 44,
-    height: 44,
-    borderRadius: 15,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  deleteCopy: { flex: 1, minWidth: 0 },
-  deleteAccountTitle: { fontSize: 16, fontWeight: "900" },
-  deleteAccountBody: { marginTop: 6, fontSize: 13, fontWeight: "700", lineHeight: 18 },
-  deletePrimaryBtn: {
-    marginTop: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    alignSelf: "stretch",
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 14,
-  },
-  deletePrimaryBtnText: { fontWeight: "900", fontSize: 15, color: "#fff" },
-
-  deleteAccountBtn: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    alignSelf: "flex-start",
-    paddingVertical: 11,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    backgroundColor: "transparent",
-  },
-  deleteAccountBtnText: { fontWeight: "900", fontSize: 14 },
+  deleteAccountBody: { fontSize: 13, fontWeight: "700", lineHeight: 18 },
 
   goLoginGradient: {
     flexDirection: "row",

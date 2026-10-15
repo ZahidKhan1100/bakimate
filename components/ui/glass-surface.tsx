@@ -10,12 +10,12 @@ type GlassSurfaceProps = {
   isDark: boolean;
 };
 
-/** Frosted panel: blur + translucent fill + crisp border (parity with HabiMate `GlassPanel`). */
+/** Frosted panel: blur + translucent fill + luminous rim border + deep shadow. */
 export function GlassSurface({ children, style, contentStyle, isDark }: GlassSurfaceProps) {
   const intensity = Platform.select({
-    ios: isDark ? 50 : 76,
-    android: isDark ? 40 : 52,
-    default: 48,
+    ios: isDark ? 68 : 86,
+    android: isDark ? 52 : 64,
+    default: 56,
   });
 
   const borderColor = isDark ? BakimateColors.glassBorderDark : BakimateColors.glassBorderLight;
@@ -29,6 +29,8 @@ export function GlassSurface({ children, style, contentStyle, isDark }: GlassSur
         style={styles.blur}
       />
       <View style={[styles.fill, { backgroundColor: fill }]} pointerEvents="none" />
+      {/* Top rim light — gives the premium "light hitting glass edge" look */}
+      <View style={[styles.rimLight, { opacity: isDark ? 0.35 : 0.9 }]} pointerEvents="none" />
       <View style={[styles.inner, contentStyle]}>{children}</View>
     </View>
   );
@@ -36,22 +38,31 @@ export function GlassSurface({ children, style, contentStyle, isDark }: GlassSur
 
 const styles = StyleSheet.create({
   outer: {
-    borderRadius: 26,
+    borderRadius: 28,
     borderWidth: 1,
     overflow: "hidden",
     ...Platform.select({
       ios: {
-        shadowColor: "#0f172a",
-        shadowOffset: { width: 0, height: 16 },
-        shadowOpacity: 0.14,
-        shadowRadius: 28,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 18 },
+        shadowOpacity: 0.22,
+        shadowRadius: 36,
       },
-      android: { elevation: 10 },
+      android: { elevation: 12 },
       default: {},
     }),
   },
   blur: { ...StyleSheet.absoluteFillObject },
   fill: { ...StyleSheet.absoluteFillObject },
+  rimLight: {
+    position: "absolute",
+    top: 0,
+    left: 24,
+    right: 24,
+    height: 1,
+    backgroundColor: "#fff",
+    borderRadius: 1,
+  },
   inner: {
     position: "relative",
     zIndex: 1,

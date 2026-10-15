@@ -15,13 +15,14 @@ export const Colors = {
     success: BakimateColors.success,
   },
   dark: {
-    text: "#F1F5F9",
+    /** Slightly cooler white — reads crisper on deep navy */
+    text: "#F0F6FF",
     background: BakimateColors.backgroundDark,
     tint: BakimateColors.accentTeal,
     icon: BakimateColors.neutralTextMutedDark,
-    tabIconDefault: "#64748B",
+    tabIconDefault: "#3D5272",
     tabIconSelected: BakimateColors.accentTeal,
-    card: "rgba(15, 23, 42, 0.01)",
+    card: "rgba(10, 22, 45, 0.01)",
     danger: "#F87171",
     success: BakimateColors.success,
   },

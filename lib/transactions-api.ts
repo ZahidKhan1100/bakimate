@@ -13,6 +13,7 @@ export type PatchTransactionPayload = {
   amount_sen: number;
   note: string | null;
   item_key: string | null;
+  recorded_at?: string | null;
 };
 
 export type PatchTransactionResponse = {

@@ -20,3 +20,18 @@ export function getPrivacyPolicyUrl(): string {
 export function getTermsOfUseUrl(): string {
   return `${getWebsiteBaseUrl()}/terms`;
 }
+
+/** Public store page so users can rate/install the app from outside. */
+export function getGooglePlayUrl(): string {
+  return "https://play.google.com/store/apps/details?id=com.ihabimate.bakimate";
+}
+
+/** Public App Store page (Apple ID 6768776202). */
+export function getAppStoreUrl(): string {
+  return "https://apps.apple.com/app/bakimate/id6768776202";
+}
+
+/** Opens the App Store straight on the "Write a Review" sheet. */
+export function getAppStoreReviewUrl(): string {
+  return `${getAppStoreUrl()}?action=write-review`;
+}

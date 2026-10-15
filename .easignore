@@ -1,0 +1,46 @@
+# EAS uses ONLY this file (not .gitignore). Keep in sync with .gitignore + build-only exclusions.
+# https://docs.expo.dev/build-reference/easignore/
+
+# --- from .gitignore ---
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+.env
+.env*.local
+*.tsbuildinfo
+app-example
+*.apk
+*.aab
+*.ipa
+
+# Native dirs: EAS runs prebuild / installs Pods & Gradle on the server
+/ios
+/android
+
+# Not needed on EAS workers
+.git/
+scripts/
+.venv-tts/
+react-native-worklets-*.tgz
+
+# Local / IDE
+.idea/
+.vscode/
+*.log
+coverage/
+__tests__/

@@ -19,6 +19,8 @@ export type OutboxTransactionPayload = {
   item_key?: string | null;
   goal_amount_sen?: number | null;
   goal_target_date?: string | null;
+  /** YYYY-MM-DD — when the entry happened (backdating). */
+  recorded_at?: string | null;
 };
 
 export type OutboxEntry = {

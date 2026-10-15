@@ -4,8 +4,10 @@ import { PersonAvatar } from "@/components/ui/person-avatar";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { pickContactWithSystemPicker } from "@/lib/contact-suggestions";
+import { findCustomerByPhoneDigits } from "@/lib/customer-phone-duplicate";
 import { setCustomerPhoto } from "@/lib/customer-photos";
-import { useCreateCustomer } from "@/lib/hooks/useCustomers";
+import { useCreateCustomer, useCustomersPage } from "@/lib/hooks/useCustomers";
+import { useSessionStore } from "@/stores/session-store";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
@@ -18,10 +20,9 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
+import { Text, TextInput } from "@/components/ui/text";
 
 type Props = {
   visible: boolean;
@@ -50,6 +51,8 @@ export function AddCustomerSheet({ visible, isDark, onClose }: Props) {
    */
   const [androidHideSheetForContactPicker, setAndroidHideSheetForContactPicker] = useState(false);
 
+  const token = useSessionStore((s) => s.token);
+  const { data: customersPage } = useCustomersPage(1, { enabled: Boolean(token) && visible });
   const createMut = useCreateCustomer();
 
   useEffect(() => {
@@ -165,8 +168,15 @@ export function AddCustomerSheet({ visible, isDark, onClose }: Props) {
       return;
     }
 
+    const phoneTrimmed = phone.trim();
+    const duplicate = findCustomerByPhoneDigits(customersPage?.data ?? [], phoneTrimmed);
+    if (duplicate) {
+      Alert.alert(t("error"), t("customer_phone_duplicate", { name: duplicate.name }));
+      return;
+    }
+
     createMut.mutate(
-      { name: n, phone: phone.trim() || null },
+      { name: n, phone: phoneTrimmed || null },
       {
         onSuccess: async (result) => {
           const created = result.customer;
@@ -198,6 +208,7 @@ export function AddCustomerSheet({ visible, isDark, onClose }: Props) {
       isDark={isDark}
       scrollable
     >
+      <Text style={[styles.sheetTitle, { color: headline }]}>{t("add_customer")}</Text>
       <View style={styles.photoWrap}>
         <Pressable
           onPress={promptPhotoSource}
@@ -269,17 +280,17 @@ export function AddCustomerSheet({ visible, isDark, onClose }: Props) {
         <BigActionButton
           onPress={handleClose}
           icon="close"
+          label={t("cancel")}
           variant="danger"
           size="lg"
-          accessibilityLabel={t("cancel")}
           style={styles.footerBtn}
         />
         <BigActionButton
           onPress={handleSave}
           icon="checkmark"
+          label={t("save")}
           variant="success"
           size="lg"
-          accessibilityLabel={t("save")}
           disabled={createMut.isPending}
           style={styles.footerBtn}
         />
@@ -295,6 +306,7 @@ export function AddCustomerSheet({ visible, isDark, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
+  sheetTitle: { fontSize: 22, fontWeight: "800", textAlign: "center", marginTop: 4, marginBottom: 12 },
   photoWrap: { alignItems: "center", marginTop: 6, marginBottom: 18 },
   photoSlot: {
     width: 128,
@@ -306,7 +318,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(46, 196, 182, 0.1)",
   },
-  label: { fontSize: 12, fontWeight: "800", marginBottom: 6, marginTop: 8 },
+  label: { fontSize: 14, fontWeight: "800", marginBottom: 6, marginTop: 8 },
   contactMatchRow: {
     flexDirection: "row",
     alignItems: "center",

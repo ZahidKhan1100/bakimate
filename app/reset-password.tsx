@@ -12,10 +12,9 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
+import { Text, TextInput } from "@/components/ui/text";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function firstParam(v: string | string[] | undefined): string {

@@ -2,7 +2,8 @@ import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import type { ReactNode } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "@/components/ui/text";
 import { MoneyDisplay } from "./money-display";
 import { PersonAvatar } from "./person-avatar";
 
@@ -21,6 +22,8 @@ type Props = {
   subline?: string;
   /** Color for the subline; default = muted. */
   sublineTone?: "muted" | "danger" | "success";
+  /** Allow multi-line customer names (e.g. home priority list). */
+  nameLines?: number;
 };
 
 /**
@@ -41,6 +44,7 @@ export function PersonRow({
   trailingAction,
   subline,
   sublineTone = "muted",
+  nameLines = 1,
 }: Props) {
   const headline = Colors[isDark ? "dark" : "light"].text;
   const muted = isDark ? BakimateColors.neutralTextMutedDark : BakimateColors.neutralText;
@@ -60,16 +64,18 @@ export function PersonRow({
       style={({ pressed }) => [
         styles.root,
         {
-          backgroundColor: isDark ? "rgba(15, 23, 42, 0.55)" : "rgba(255, 255, 255, 0.94)",
-          opacity: pressed ? 0.94 : 1,
+          backgroundColor: isDark ? "rgba(10, 20, 46, 0.78)" : "rgba(255, 255, 255, 0.96)",
+          borderWidth: 1,
+          borderColor: isDark ? "rgba(255, 255, 255, 0.09)" : "rgba(15, 23, 42, 0.07)",
+          opacity: pressed ? 0.92 : 1,
           ...Platform.select({
             ios: {
               shadowColor: "#000",
-              shadowOffset: { width: 0, height: 6 },
-              shadowOpacity: isDark ? 0.4 : 0.1,
-              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: isDark ? 0.55 : 0.1,
+              shadowRadius: 18,
             },
-            android: { elevation: 3 },
+            android: { elevation: 4 },
             default: {},
           }),
         },
@@ -78,7 +84,7 @@ export function PersonRow({
       <PersonAvatar name={name} customerId={kind === "customer" ? id : null} kind={kind} size="md" />
 
       <View style={styles.body}>
-        <Text style={[styles.name, { color: headline }]} numberOfLines={1}>
+        <Text style={[styles.name, { color: headline }]} numberOfLines={nameLines}>
           {name}
         </Text>
         {subline ? (
@@ -110,14 +116,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
     paddingHorizontal: 14,
-    borderRadius: 22,
+    borderRadius: 24,
     marginBottom: 10,
   },
   body: { flex: 1, minWidth: 0 },
   name: { fontSize: 18, fontWeight: "800", letterSpacing: -0.2 },
-  subline: { marginTop: 2, fontSize: 12, fontWeight: "700" },
+  subline: { marginTop: 2, fontSize: 14, fontWeight: "700" },
   amountWrap: { alignItems: "flex-end", justifyContent: "center" },
   chevron: { marginLeft: 2 },
 });

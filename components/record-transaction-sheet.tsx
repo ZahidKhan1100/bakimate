@@ -5,9 +5,11 @@ import { MoneyKeypad } from "@/components/money-keypad";
 import { QuickAmountChips } from "@/components/ui/quick-amount-chips";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
+import { presentRewardedAdGate } from "@/lib/ads/rewarded-ad-gate";
 import type { Customer, CustomerLedgerTransactionApi } from "@/lib/api-types";
 import { isPremiumRecordingBlockedError } from "@/lib/errors/premium-recording-blocked-error";
-import { formatCalendarDateShort } from "@/lib/format-dates";
+import { addDaysLocal, todayYmd } from "@/lib/calendar-ymd";
+import { formatCalendarDateShort, intlLocaleFor } from "@/lib/format-dates";
 import { useRecordTransaction } from "@/lib/hooks/useRecordTransaction";
 import { usePatchCustomerLedgerTransaction } from "@/lib/hooks/useLedgerTransactionMutations";
 import {
@@ -16,11 +18,13 @@ import {
 } from "@/lib/payment-receipt";
 import { iconForQuickItem } from "@/lib/quick-item-icons";
 import { shareCreditInvoicePdf, sharePaymentReceiptPdf } from "@/lib/pdf-download";
+import type { PremiumRecordingAccess } from "@/lib/premium-recording-access";
 import { profileToReceiptBlurb, resolveShopProfile } from "@/lib/shop-profile";
 import { apiErrorMessage } from "@/lib/api-error-message";
 import { isAbortError } from "@/lib/is-abort-error";
 import { fetchIsDeviceOffline } from "@/lib/network-offline";
 import type { OutboxTransactionPayload } from "@/lib/transaction-outbox";
+import { VOICE_ENABLED } from "@/lib/feature-flags";
 import { useVoiceLedgerCapture } from "@/lib/use-voice-ledger";
 import {
   parseVoiceLedger,
@@ -33,7 +37,7 @@ import {
 } from "@/lib/normalize-voice-ledger-parse";
 import {
   buildVoiceContextualStrings,
-  resolveVoiceSttBcp47,
+  resolveSpeechLocaleForDevice,
 } from "@/lib/voice-stt-locale";
 import { openWhatsAppText } from "@/lib/whatsapp";
 import { normalizePhoneForWaMe } from "@/lib/phone-wa-me";
@@ -51,10 +55,9 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
+import { Text, TextInput } from "@/components/ui/text";
 
 type Mode = "credit" | "payment";
 
@@ -73,16 +76,16 @@ type Props = {
   onSaved: () => void;
   /** When set, the sheet PATCHes this ledger row instead of POSTing a new one. */
   editingTransaction?: CustomerLedgerTransactionApi | null;
+  /** Gates the post-save "share via WhatsApp"/"share PDF" buttons behind a rewarded ad when not entitled. */
+  premiumAccess?: PremiumRecordingAccess;
 };
 
-function addDaysLocal(days: number): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + days);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const da = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${da}`;
+function ymdFromIso(iso: string | null | undefined): string {
+  if (!iso) {
+    return todayYmd();
+  }
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(iso.trim());
+  return m?.[1] ?? todayYmd();
 }
 
 /**
@@ -103,6 +106,7 @@ export function RecordTransactionSheet({
   onOpenDuitnowQr,
   onSaved,
   editingTransaction = null,
+  premiumAccess,
 }: Props) {
   const { t, i18n } = useTranslation();
   const headline = Colors[isDark ? "dark" : "light"].text;
@@ -118,8 +122,10 @@ export function RecordTransactionSheet({
   const [goalPayByYmd, setGoalPayByYmd] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
+  const [transactionDateYmd, setTransactionDateYmd] = useState(() => todayYmd());
   const [voiceConfirm, setVoiceConfirm] = useState<VoiceLedgerParseResponse | null>(null);
   const [voiceParsing, setVoiceParsing] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const voiceSttPref = useUiPreferencesStore((s) => s.voiceSttLocale);
 
@@ -141,8 +147,10 @@ export function RecordTransactionSheet({
     setGoalAmountRmText("");
     setGoalPayByYmd("");
     setMoreOpen(false);
+    setTransactionDateYmd(todayYmd());
     setVoiceConfirm(null);
     setVoiceParsing(false);
+    setShowDatePicker(false);
   };
 
   const editingId = editingTransaction?.id ?? 0;
@@ -154,6 +162,7 @@ export function RecordTransactionSheet({
       setValueSen(editingTransaction.amount_sen);
       setNote(editingTransaction.note ?? "");
       setSelectedQuickItem(editingTransaction.item_key?.trim() || null);
+      setTransactionDateYmd(ymdFromIso(editingTransaction.created_at));
       setNextDue(null);
       setGoalAmountRmText("");
       setGoalPayByYmd("");
@@ -169,7 +178,6 @@ export function RecordTransactionSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resetBranch uses stable resetState-shaped fields only when opening/closing modes
   }, [visible, editingId]);
 
-  const sttLocale = resolveVoiceSttBcp47(voiceSttPref, i18n.language);
   const intentHint: "credit" | "payment" =
     mode === "credit" ? "credit" : mode === "payment" ? "payment" : "payment";
   const contextualStrings = useMemo(
@@ -186,7 +194,7 @@ export function RecordTransactionSheet({
 
   const { speechAvailable, listening, interimTranscript, listenOnce, cancelListening } =
     useVoiceLedgerCapture({
-      locale: sttLocale,
+      locale: "en-US",
       contextualStrings,
     });
 
@@ -219,7 +227,8 @@ export function RecordTransactionSheet({
     setVoiceConfirm(null);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
-    const transcript = await listenOnce();
+    const sttLocale = await resolveSpeechLocaleForDevice(voiceSttPref, i18n.language);
+    const transcript = await listenOnce(sttLocale);
     const trimmed = transcript.trim();
     if (!trimmed) {
       return;
@@ -288,7 +297,7 @@ export function RecordTransactionSheet({
         setVoiceParsing(false);
       }
     }
-  }, [currency, customer.name, i18n.language, intentHint, isEditing, listenOnce, mode, quickItems, t]);
+  }, [currency, customer.name, i18n.language, intentHint, isEditing, listenOnce, mode, quickItems, t, voiceSttPref]);
 
   const applyVoiceConfirm = useCallback(() => {
     if (!voiceConfirm?.amount_sen || voiceConfirm.amount_sen <= 0) {
@@ -337,6 +346,7 @@ export function RecordTransactionSheet({
           amount_sen: valueSen,
           note: note.trim() || null,
           item_key: isCredit ? selectedQuickItem?.trim() ?? null : null,
+          recorded_at: transactionDateYmd,
         },
         {
           onSuccess: () => {
@@ -367,6 +377,7 @@ export function RecordTransactionSheet({
       type: isCredit ? "credit" : "payment",
       note: note.trim() || null,
       next_due_at: isCredit && nextDue ? nextDue : null,
+      recorded_at: transactionDateYmd,
     };
 
     if (isCredit) {
@@ -421,9 +432,11 @@ export function RecordTransactionSheet({
               buttons.unshift({
                 text: t("share_pdf"),
                 onPress: () => {
-                  void sharePaymentReceiptPdf(customer.id, payTid, { whatsappPhone: rawPhone }).catch((err) => {
-                    Alert.alert(t("error"), err instanceof Error ? err.message : String(err));
-                  });
+                  void presentRewardedAdGate(premiumAccess)
+                    .then(() => sharePaymentReceiptPdf(customer.id, payTid, { whatsappPhone: rawPhone }))
+                    .catch((err) => {
+                      Alert.alert(t("error"), err instanceof Error ? err.message : String(err));
+                    });
                 },
               });
             }
@@ -434,9 +447,11 @@ export function RecordTransactionSheet({
                   Alert.alert(t("error"), t("contact_phone_required_whatsapp"));
                   return;
                 }
-                void openWhatsAppText(msg, rawPhone).catch(() => {
-                  Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
-                });
+                void presentRewardedAdGate(premiumAccess)
+                  .then(() => openWhatsAppText(msg, rawPhone))
+                  .catch(() => {
+                    Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
+                  });
               },
             });
             Alert.alert(t("payment_saved_title"), t("payment_saved_body"), buttons);
@@ -469,9 +484,11 @@ export function RecordTransactionSheet({
               buttons.unshift({
                 text: t("share_pdf"),
                 onPress: () => {
-                  void shareCreditInvoicePdf(customer.id, tid, { whatsappPhone: rawPhone }).catch((err) => {
-                    Alert.alert(t("error"), err instanceof Error ? err.message : String(err));
-                  });
+                  void presentRewardedAdGate(premiumAccess)
+                    .then(() => shareCreditInvoicePdf(customer.id, tid, { whatsappPhone: rawPhone }))
+                    .catch((err) => {
+                      Alert.alert(t("error"), err instanceof Error ? err.message : String(err));
+                    });
                 },
               });
               buttons.unshift({
@@ -481,9 +498,11 @@ export function RecordTransactionSheet({
                     Alert.alert(t("error"), t("contact_phone_required_whatsapp"));
                     return;
                   }
-                  void openWhatsAppText(msg, rawPhone).catch(() => {
-                    Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
-                  });
+                  void presentRewardedAdGate(premiumAccess)
+                    .then(() => openWhatsAppText(msg, rawPhone))
+                    .catch(() => {
+                      Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
+                    });
                 },
               });
               Alert.alert(t("credit_invoice_title"), t("credit_invoice_body_whatsapp"), buttons);
@@ -534,6 +553,9 @@ export function RecordTransactionSheet({
             />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[styles.sheetTitle, { color: accentColor }]} numberOfLines={1}>
+              {isCredit ? t("sheet_gave_title") : t("sheet_got_title")}
+            </Text>
             <MoneyDisplay
               sen={valueSen}
               currencyCode={currency}
@@ -551,7 +573,7 @@ export function RecordTransactionSheet({
           </View>
         </View>
 
-        {!isEditing && speechAvailable ? (
+        {VOICE_ENABLED && !isEditing && speechAvailable ? (
           <View style={styles.voiceSection}>
             <Pressable
               onPress={() => {
@@ -683,6 +705,73 @@ export function RecordTransactionSheet({
           />
         </View>
 
+        {/* Transaction date */}
+        {(() => {
+          const todayStr = todayYmd();
+          const yesterdayStr = addDaysLocal(-1);
+          const isCustomDate = transactionDateYmd !== todayStr && transactionDateYmd !== yesterdayStr;
+          return (
+            <View style={styles.section}>
+              <Text style={[styles.sectionHint, { color: muted }]}>{t("sheet_transaction_date")}</Text>
+              <View style={styles.dueRow}>
+                {[
+                  { key: "today", ymd: todayStr, label: t("sheet_date_today") },
+                  { key: "yesterday", ymd: yesterdayStr, label: t("sheet_date_yesterday") },
+                ].map(({ key, ymd, label }) => {
+                  const sel = transactionDateYmd === ymd;
+                  return (
+                    <Pressable
+                      key={key}
+                      onPress={() => setTransactionDateYmd(ymd)}
+                      style={({ pressed }) => [
+                        styles.dueTile,
+                        {
+                          borderColor: sel ? BakimateColors.accentTeal : BakimateColors.border,
+                          backgroundColor: sel
+                            ? "rgba(46, 196, 182, 0.18)"
+                            : isDark
+                              ? "rgba(255,255,255,0.04)"
+                              : "rgba(255,255,255,0.7)",
+                          opacity: pressed ? 0.86 : 1,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.dueTileText, { color: headline }]}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={() => setShowDatePicker(true)}
+                  style={({ pressed }) => [
+                    styles.dueTile,
+                    {
+                      borderColor: isCustomDate ? BakimateColors.accentTeal : BakimateColors.border,
+                      backgroundColor: isCustomDate
+                        ? "rgba(46, 196, 182, 0.18)"
+                        : isDark
+                          ? "rgba(255,255,255,0.04)"
+                          : "rgba(255,255,255,0.7)",
+                      opacity: pressed ? 0.86 : 1,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="calendar-outline"
+                    size={20}
+                    color={isCustomDate ? BakimateColors.accentTeal : headline}
+                  />
+                  <Text style={[styles.dueTileText, { color: isCustomDate ? BakimateColors.accentTeal : headline }]}>
+                    {t("sheet_date_pick")}
+                  </Text>
+                </Pressable>
+              </View>
+              <Text style={[styles.dateSelected, { color: muted }]}>
+                {formatCalendarDateShort(transactionDateYmd, i18n.language)}
+              </Text>
+            </View>
+          );
+        })()}
+
         {/* Big keypad */}
         <View style={{ marginTop: 6 }}>
           <MoneyKeypad valueSen={valueSen} onChangeSen={setValueSen} />
@@ -768,7 +857,7 @@ export function RecordTransactionSheet({
                         { color: sel ? BakimateColors.accentTeal : headline },
                       ]}
                     >
-                      {days}
+                      {t("due_tile_days", { count: days })}
                     </Text>
                   </Pressable>
                 );
@@ -817,7 +906,7 @@ export function RecordTransactionSheet({
             color={muted}
           />
           <Text style={[styles.moreToggleText, { color: muted }]}>
-            {moreOpen ? t("cancel") : t("note_optional")}
+            {moreOpen ? t("sheet_hide_note") : t("note_optional")}
           </Text>
         </Pressable>
 
@@ -924,6 +1013,17 @@ export function RecordTransactionSheet({
       )}
     </BottomSheet>
 
+    <DatePickerModal
+      visible={showDatePicker}
+      selectedYmd={transactionDateYmd}
+      isDark={isDark}
+      onSelect={(ymd) => {
+        setTransactionDateYmd(ymd);
+        setShowDatePicker(false);
+      }}
+      onClose={() => setShowDatePicker(false)}
+    />
+
     <Modal
       visible={voiceParsing}
       transparent
@@ -967,8 +1067,182 @@ export function RecordTransactionSheet({
   );
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function ymdToParts(ymd: string): { year: number; month: number; day: number } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (m) return { year: Number(m[1]), month: Number(m[2]) - 1, day: Number(m[3]) };
+  const d = new Date();
+  return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+}
+
+function buildCalendarCells(year: number, month: number): (number | null)[] {
+  const firstDow = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = [
+    ...Array<null>(firstDow).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+// ─── Date Picker Modal ────────────────────────────────────────────────────────
+
+type DatePickerModalProps = {
+  visible: boolean;
+  selectedYmd: string;
+  isDark: boolean;
+  onSelect: (ymd: string) => void;
+  onClose: () => void;
+};
+
+function DatePickerModal({ visible, selectedYmd, isDark, onSelect, onClose }: DatePickerModalProps) {
+  const { i18n } = useTranslation();
+  const headline = Colors[isDark ? "dark" : "light"].text;
+  const muted = isDark ? BakimateColors.neutralTextMutedDark : BakimateColors.neutralText;
+  const bg = isDark ? "#0F172A" : "#ffffff";
+
+  const sel = ymdToParts(selectedYmd);
+  const [viewYear, setViewYear] = useState(sel.year);
+  const [viewMonth, setViewMonth] = useState(sel.month);
+
+  useEffect(() => {
+    if (visible) {
+      const p = ymdToParts(selectedYmd);
+      setViewYear(p.year);
+      setViewMonth(p.month);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayYmdStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  const isCurrentOrFutureMonth =
+    viewYear > today.getFullYear() ||
+    (viewYear === today.getFullYear() && viewMonth >= today.getMonth());
+
+  const prevMonth = () => {
+    if (viewMonth === 0) { setViewYear((y) => y - 1); setViewMonth(11); }
+    else setViewMonth((m) => m - 1);
+  };
+  const nextMonth = () => {
+    if (isCurrentOrFutureMonth) return;
+    if (viewMonth === 11) { setViewYear((y) => y + 1); setViewMonth(0); }
+    else setViewMonth((m) => m + 1);
+  };
+
+  const monthLabel = new Intl.DateTimeFormat(intlLocaleFor(i18n.language), {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(viewYear, viewMonth, 1));
+
+  const cells = buildCalendarCells(viewYear, viewMonth);
+  const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={dpStyles.backdrop} onPress={onClose}>
+        <Pressable
+          style={[dpStyles.card, { backgroundColor: bg, borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.12)" }]}
+          onPress={() => {}}
+        >
+          <View style={dpStyles.navRow}>
+            <Pressable onPress={prevMonth} style={({ pressed }) => [dpStyles.navBtn, { opacity: pressed ? 0.6 : 1 }]}>
+              <Ionicons name="chevron-back" size={22} color={BakimateColors.accentTeal} />
+            </Pressable>
+            <Text style={[dpStyles.monthLabel, { color: headline }]}>{monthLabel}</Text>
+            <Pressable
+              onPress={nextMonth}
+              disabled={isCurrentOrFutureMonth}
+              style={({ pressed }) => [dpStyles.navBtn, { opacity: isCurrentOrFutureMonth || pressed ? 0.3 : 1 }]}
+            >
+              <Ionicons name="chevron-forward" size={22} color={BakimateColors.accentTeal} />
+            </Pressable>
+          </View>
+
+          <View style={dpStyles.weekRow}>
+            {WEEKDAYS.map((d, i) => (
+              <Text key={i} style={[dpStyles.weekday, { color: muted }]}>{d}</Text>
+            ))}
+          </View>
+
+          <View style={dpStyles.grid}>
+            {cells.map((day, idx) => {
+              if (day == null) return <View key={idx} style={dpStyles.cell} />;
+              const cellYmd = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const cellDate = new Date(viewYear, viewMonth, day);
+              const isDisabled = cellDate > today;
+              const isSel = cellYmd === selectedYmd;
+              const isToday = cellYmd === todayYmdStr;
+              return (
+                <Pressable
+                  key={idx}
+                  disabled={isDisabled}
+                  onPress={() => { onSelect(cellYmd); onClose(); }}
+                  style={({ pressed }) => [
+                    dpStyles.cell,
+                    isSel && dpStyles.cellSelected,
+                    !isSel && isToday && dpStyles.cellToday,
+                    { opacity: isDisabled ? 0.2 : pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <Text style={[dpStyles.dayText, { color: isSel ? "#fff" : headline }]}>{day}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const dpStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  card: {
+    width: "100%",
+    maxWidth: 340,
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  navRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+  },
+  navBtn: { padding: 6 },
+  monthLabel: { fontSize: 16, fontWeight: "900", flex: 1, textAlign: "center" },
+  weekRow: { flexDirection: "row", justifyContent: "space-around" },
+  weekday: { width: "14.28%", textAlign: "center", fontSize: 13, fontWeight: "800" },
+  grid: { flexDirection: "row", flexWrap: "wrap" },
+  cell: {
+    width: "14.28%",
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cellSelected: { backgroundColor: BakimateColors.accentTeal, borderRadius: 999 },
+  cellToday: { borderWidth: 1.5, borderColor: BakimateColors.accentTeal, borderRadius: 999 },
+  dayText: { fontSize: 14, fontWeight: "700" },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  sheetEditHint: { marginTop: 4, fontSize: 12, fontWeight: "800", letterSpacing: 0.2 },
+  sheetEditHint: { marginTop: 4, fontSize: 14, fontWeight: "800", letterSpacing: 0.2 },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -983,9 +1257,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerCaption: { marginTop: 4, fontSize: 13, fontWeight: "700" },
+  sheetTitle: { fontSize: 18, fontWeight: "800", marginBottom: 2 },
+  headerCaption: { marginTop: 4, fontSize: 15, fontWeight: "700" },
   section: { marginTop: 14 },
-  sectionHint: { fontSize: 12, fontWeight: "800", marginBottom: 8, letterSpacing: 0.2 },
+  sectionHint: { fontSize: 14, fontWeight: "800", marginBottom: 8, letterSpacing: 0.2 },
   itemRow: { gap: 10, paddingVertical: 2 },
   itemChip: {
     minWidth: 84,
@@ -996,7 +1271,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  itemChipText: { fontWeight: "800", fontSize: 12 },
+  itemChipText: { fontWeight: "800", fontSize: 14 },
   dueRow: { flexDirection: "row", gap: 10 },
   dueTile: {
     flex: 1,
@@ -1007,8 +1282,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 4,
   },
-  dueDayNum: { fontSize: 26, fontWeight: "900", letterSpacing: -0.5 },
-  dueResolved: { marginTop: 6, fontSize: 12, fontWeight: "700", textAlign: "center" },
+  dueDayNum: { fontSize: 18, fontWeight: "900" },
+  dueTileText: { fontSize: 15, fontWeight: "800" },
+  dateSelected: { marginTop: 8, fontSize: 13, fontWeight: "600", textAlign: "center" },
+  dueResolved: { marginTop: 6, fontSize: 14, fontWeight: "700", textAlign: "center" },
   qrLink: {
     flexDirection: "row",
     alignItems: "center",
@@ -1030,7 +1307,7 @@ const styles = StyleSheet.create({
   },
   moreToggleText: { fontSize: 13, fontWeight: "800" },
   moreSection: { marginTop: 8 },
-  label: { fontSize: 12, fontWeight: "800", marginBottom: 6, marginTop: 8 },
+  label: { fontSize: 14, fontWeight: "800", marginBottom: 6, marginTop: 8 },
   input: {
     borderWidth: 1,
     borderRadius: 12,
@@ -1050,7 +1327,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   voiceSpeakTitle: { fontSize: 15, fontWeight: "900" },
-  voiceSpeakHint: { marginTop: 2, fontSize: 12, fontWeight: "600" },
+  voiceSpeakHint: { marginTop: 2, fontSize: 14, fontWeight: "600" },
   voiceConfirmCard: {
     borderWidth: 2,
     borderRadius: 16,

@@ -1,6 +1,7 @@
 import { BakimateColors } from "@/constants/bakimate-theme";
 
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { Text } from "@/components/ui/text";
 
 type Props = {
   ratio: number;

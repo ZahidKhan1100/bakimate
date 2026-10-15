@@ -1,4 +1,6 @@
 import { GoalProgressRing } from "@/components/goal-progress-ring";
+import { CustomerLedgerSheet } from "@/components/customer-ledger-sheet";
+import { CustomerTransactionDetailSheet } from "@/components/customer-transaction-detail-sheet";
 import { RecordTransactionSheet } from "@/components/record-transaction-sheet";
 import { BigActionButton } from "@/components/ui/big-action-button";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
@@ -9,12 +11,14 @@ import { PersonAvatar } from "@/components/ui/person-avatar";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { presentRewardedAdGate } from "@/lib/ads/rewarded-ad-gate";
 import { setCustomerPhoto, useCustomerPhoto, clearCustomerPhoto } from "@/lib/customer-photos";
 import { rotateCustomerBalancePublicLink } from "@/lib/customers-api";
 import { isPremiumRecordingBlockedError } from "@/lib/errors/premium-recording-blocked-error";
 import { formatCalendarDateShort } from "@/lib/format-dates";
 import { useCustomer } from "@/lib/hooks/useCustomer";
-import { useDeleteCustomer, usePatchCustomer } from "@/lib/hooks/useCustomers";
+import { findCustomerByPhoneDigits } from "@/lib/customer-phone-duplicate";
+import { useCustomersPage, useDeleteCustomer, usePatchCustomer } from "@/lib/hooks/useCustomers";
 import { useDeleteCustomerLedgerTransaction } from "@/lib/hooks/useLedgerTransactionMutations";
 import { flushOutboxesNow } from "@/lib/flush-outboxes-now";
 import { outboxSyncFailureMessage, outboxSyncThrownMessage } from "@/lib/outbox-sync-user-message";
@@ -28,7 +32,6 @@ import { formatMoneyMinor, goalProgressPaidRatio, parseRmToSen, suggestedWeeklyP
 import { apiErrorMessage } from "@/lib/api";
 import { buildInstallmentReminderMessage } from "@/lib/payment-receipt";
 import { shareCreditInvoicePdf, shareCustomerPdf, sharePaymentReceiptPdf } from "@/lib/pdf-download";
-import { isNetInfoOffline } from "@/lib/network-offline";
 import { assertRecordingPremiumOrThrow } from "@/lib/premium-recording-access";
 import { createCustomerPromise, updateCustomerPromise } from "@/lib/promise-api";
 import { cancelPromiseReminder, schedulePromiseDueReminder } from "@/lib/promise-reminders";
@@ -39,7 +42,6 @@ import { normalizePhoneForWaMe } from "@/lib/phone-wa-me";
 import { queryClient } from "@/lib/query-client";
 import { useSessionStore } from "@/stores/session-store";
 import type { CustomerLedgerTransactionApi, CustomerPromise } from "@/lib/api-types";
-import { useNetInfo } from "@react-native-community/netinfo";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery, useIsRestoring } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
@@ -48,7 +50,7 @@ import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import { isAxiosError } from "axios";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -59,10 +61,9 @@ import {
   ScrollView,
   Share,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
+import { Text, TextInput } from "@/components/ui/text";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function addDaysLocal(days: number): string {
@@ -98,7 +99,7 @@ const DEFAULT_CREDIT_QUICK_ITEMS = ["Phone", "Fridge", "Grocery", "Accessory", "
 
 export default function CustomerDetailScreen() {
   const { t, i18n } = useTranslation();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, record } = useLocalSearchParams<{ id: string; record?: string }>();
   const customerId = Number(id);
   const token = useSessionStore((s) => s.token);
   const rawScheme = useColorScheme();
@@ -128,8 +129,6 @@ export default function CustomerDetailScreen() {
 
   const currency = useShopCurrency();
   const photoUri = useCustomerPhoto(customerId);
-  const netInfo = useNetInfo();
-  const deviceOffline = isNetInfoOffline(netInfo);
   const premiumRecording = usePremiumRecordingAccess(Boolean(token));
   const premiumBootstrapBlocks = usePremiumEntitlementBootstrapBlocksUi(premiumRecording.isLoading);
   const pendingOutbox = useOutboxPendingForCustomer(customerId, Boolean(token));
@@ -137,7 +136,9 @@ export default function CustomerDetailScreen() {
   const [syncBusy, setSyncBusy] = useState(false);
 
   const [sheetType, setSheetType] = useState<"credit" | "payment" | null>(null);
+  const [moreActionsOpen, setMoreActionsOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<CustomerLedgerTransactionApi | null>(null);
+  const [viewingTx, setViewingTx] = useState<CustomerLedgerTransactionApi | null>(null);
   const [duitnowQrOpen, setDuitnowQrOpen] = useState(false);
   const [promiseOpen, setPromiseOpen] = useState(false);
   const [promiseAmtRm, setPromiseAmtRm] = useState("");
@@ -145,11 +146,14 @@ export default function CustomerDetailScreen() {
   const [promiseNoteText, setPromiseNoteText] = useState("");
   const [pdfBusy, setPdfBusy] = useState<"ledger" | "settlement" | null>(null);
   const [invoiceBusyId, setInvoiceBusyId] = useState<number | null>(null);
+  const [remindBusy, setRemindBusy] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
 
+  const { data: customersPage } = useCustomersPage(1, { enabled: Boolean(token) });
   const patchCustomerMu = usePatchCustomer();
   const deleteCustomerMu = useDeleteCustomer();
   const deleteLedgerTxMu = useDeleteCustomerLedgerTransaction(customerId);
@@ -162,6 +166,12 @@ export default function CustomerDetailScreen() {
   const duitnowQrUrl = useMemo(
     () => shopProfileQ.data?.duitnow_qr_url?.trim() ?? "",
     [shopProfileQ.data?.duitnow_qr_url],
+  );
+
+  /** Preview only — full history is in the ledger sheet. */
+  const recentPreviewTx = useMemo(
+    () => (customer?.recent_transactions ?? []).slice(0, 3),
+    [customer?.recent_transactions],
   );
 
   const balanceLinkMu = useMutation({
@@ -224,17 +234,8 @@ export default function CustomerDetailScreen() {
     onError: (e: unknown) => Alert.alert(t("error"), e instanceof Error ? e.message : String(e)),
   });
 
-  const requirePremium = () => {
-    /** Offline: allow opening record sheet and queueing; subscription is checked when syncing online. */
-    if (deviceOffline) return true;
-    const status = premiumRecording.data;
-    if (premiumBootstrapBlocks) return false;
-    if (status?.requiresPremium === true && !status.entitled) {
-      router.push("/paywall");
-      return false;
-    }
-    return true;
-  };
+  /** Recording credits/payments is never subscription-gated — only WhatsApp report sharing is. */
+  const requirePremium = () => true;
 
   const openSheet = (kind: "credit" | "payment") => {
     if (!requirePremium()) return;
@@ -243,9 +244,27 @@ export default function CustomerDetailScreen() {
     setSheetType(kind);
   };
 
+  /** Home "Gave on credit" / "Got money" shortcuts land here with ?record= to open the sheet straight away. */
+  const autoOpenedRecord = useRef(false);
+  useEffect(() => {
+    if (autoOpenedRecord.current || !customer) return;
+    if (record === "credit" || record === "payment") {
+      autoOpenedRecord.current = true;
+      openSheet(record);
+      router.setParams({ record: undefined });
+    }
+  }, [customer, record]);
+
+  const openViewLedgerTx = (tx: CustomerLedgerTransactionApi) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setViewingTx(tx);
+  };
+
   const openEditLedgerTx = (tx: CustomerLedgerTransactionApi) => {
     if (!requirePremium()) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setViewingTx(null);
+    setLedgerOpen(false);
     setEditingTx(tx);
     setSheetType(tx.type === "credit" ? "credit" : "payment");
   };
@@ -293,10 +312,14 @@ export default function CustomerDetailScreen() {
     const session = useSessionStore.getState();
     const shopBlur = profileToReceiptBlurb(resolveShopProfile(session.shopProfiles ?? {}, session.user?.id));
     const msg = buildInstallmentReminderMessage(customer.name, customer.balance_sen, shopBlur);
+    setRemindBusy(true);
     try {
+      await presentRewardedAdGate(premiumRecording.data);
       await openWhatsAppText(msg, customer.phone);
     } catch {
       Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
+    } finally {
+      setRemindBusy(false);
     }
   };
 
@@ -376,13 +399,13 @@ export default function CustomerDetailScreen() {
       return;
     }
     if (!customer) return;
-    if (!requirePremium()) return;
     if (kind === "settlement" && customer.balance_sen !== 0) {
       Alert.alert(t("error"), t("customer_settlement_not_ready"));
       return;
     }
     setPdfBusy(kind);
     try {
+      await presentRewardedAdGate(premiumRecording.data);
       await shareCustomerPdf(customer.id, kind, { whatsappPhone: customer.phone });
     } catch (e: unknown) {
       const code =
@@ -405,9 +428,9 @@ export default function CustomerDetailScreen() {
       return;
     }
     if (!customer) return;
-    if (!requirePremium()) return;
     setInvoiceBusyId(tx.id);
     try {
+      await presentRewardedAdGate(premiumRecording.data);
       if (tx.type === "credit") {
         await shareCreditInvoicePdf(customer.id, tx.id, { whatsappPhone: customer.phone });
       } else {
@@ -481,6 +504,12 @@ export default function CustomerDetailScreen() {
     const name = editName.trim();
     if (!name) {
       Alert.alert(t("error"), t("customer_name_required"));
+      return;
+    }
+    const phoneTrimmed = editPhone.trim();
+    const duplicate = findCustomerByPhoneDigits(customersPage?.data ?? [], phoneTrimmed, customerId);
+    if (duplicate) {
+      Alert.alert(t("error"), t("customer_phone_duplicate", { name: duplicate.name }));
       return;
     }
     patchCustomerMu.mutate(
@@ -581,30 +610,105 @@ export default function CustomerDetailScreen() {
 
           {/* Hero */}
           <View style={styles.heroWrap}>
-            <Pressable
-              onPress={onChangePhoto}
-              onLongPress={onChangePhoto}
-              accessibilityRole="imagebutton"
-              accessibilityLabel={customer.name}
-              style={({ pressed }) => [styles.photoFrame, { opacity: pressed ? 0.85 : 1 }]}
+            <LinearGradient
+              colors={
+                owes
+                  ? isDark
+                    ? ["rgba(251, 113, 133, 0.35)", "rgba(249, 115, 22, 0.08)", "transparent"]
+                    : ["rgba(254, 202, 202, 0.55)", "rgba(255, 237, 213, 0.2)", "transparent"]
+                  : isDark
+                    ? ["rgba(52, 211, 153, 0.28)", "rgba(46, 196, 182, 0.06)", "transparent"]
+                    : ["rgba(167, 243, 208, 0.45)", "rgba(204, 251, 241, 0.15)", "transparent"]
+              }
+              style={styles.heroGlow}
+              pointerEvents="none"
+            />
+
+            <LinearGradient
+              colors={
+                owes
+                  ? [BakimateColors.danger, "#F97316"]
+                  : [BakimateColors.success, BakimateColors.accentTeal]
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.avatarRing}
             >
-              <PersonAvatar
-                name={customer.name}
-                customerId={customer.id}
-                uriOverride={photoUri}
-                size="lg"
-                kind="customer"
-              />
-              <View style={[styles.photoEditBadge, { backgroundColor: BakimateColors.accentTeal }]}>
-                <Ionicons name={photoBusy ? "hourglass-outline" : "camera"} size={16} color="#fff" />
-              </View>
-            </Pressable>
+              <Pressable
+                onPress={onChangePhoto}
+                onLongPress={onChangePhoto}
+                accessibilityRole="imagebutton"
+                accessibilityLabel={customer.name}
+                style={({ pressed }) => [
+                  styles.avatarInner,
+                  {
+                    backgroundColor: isDark ? "#0B1220" : "#FFFFFF",
+                    opacity: pressed ? 0.88 : 1,
+                  },
+                ]}
+              >
+                <PersonAvatar
+                  name={customer.name}
+                  customerId={customer.id}
+                  uriOverride={photoUri}
+                  size="lg"
+                  kind="customer"
+                />
+                {!photoUri ? (
+                  <View
+                    style={[
+                      styles.photoEditBadge,
+                      {
+                        backgroundColor: owes
+                          ? isDark
+                            ? "#E11D48"
+                            : BakimateColors.danger
+                          : isDark
+                            ? "#0D9488"
+                            : BakimateColors.accentTeal,
+                        borderColor: isDark ? "#0B1220" : "#FFFFFF",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={photoBusy ? "hourglass-outline" : "camera-outline"}
+                      size={13}
+                      color="#fff"
+                    />
+                  </View>
+                ) : null}
+              </Pressable>
+            </LinearGradient>
 
             <Text style={[styles.heroName, { color: headline }]} numberOfLines={2}>
               {customer.name}
             </Text>
 
-            <View style={{ marginTop: 6, alignItems: "center" }}>
+            <LinearGradient
+              colors={
+                owes
+                  ? isDark
+                    ? ["rgba(251, 113, 133, 0.22)", "rgba(15, 23, 42, 0.92)"]
+                    : ["rgba(254, 226, 226, 0.95)", "rgba(255, 255, 255, 0.98)"]
+                  : isDark
+                    ? ["rgba(52, 211, 153, 0.16)", "rgba(15, 23, 42, 0.92)"]
+                    : ["rgba(209, 250, 229, 0.9)", "rgba(255, 255, 255, 0.98)"]
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[
+                styles.balanceCard,
+                {
+                  borderColor: owes
+                    ? isDark
+                      ? "rgba(251, 113, 133, 0.45)"
+                      : "rgba(248, 113, 113, 0.35)"
+                    : isDark
+                      ? "rgba(52, 211, 153, 0.4)"
+                      : "rgba(52, 211, 153, 0.3)",
+                },
+              ]}
+            >
               <MoneyDisplay
                 sen={customer.balance_sen}
                 currencyCode={currency}
@@ -612,10 +716,36 @@ export default function CustomerDetailScreen() {
                 size="huge"
                 align="center"
               />
-              <Text style={[styles.heroStatus, { color: owes ? BakimateColors.danger : BakimateColors.success }]}>
-                {owes ? t("outstanding_balance") : t("no_balance_hint")}
-              </Text>
-            </View>
+              <View
+                style={[
+                  styles.balanceStatusPill,
+                  {
+                    backgroundColor: owes
+                      ? isDark
+                        ? "rgba(251, 113, 133, 0.2)"
+                        : "rgba(254, 226, 226, 0.9)"
+                      : isDark
+                        ? "rgba(52, 211, 153, 0.18)"
+                        : "rgba(209, 250, 229, 0.85)",
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.balanceStatusDot,
+                    { backgroundColor: owes ? BakimateColors.danger : BakimateColors.success },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.heroStatus,
+                    { color: owes ? BakimateColors.danger : BakimateColors.success },
+                  ]}
+                >
+                  {owes ? t("outstanding_balance") : t("no_balance_hint")}
+                </Text>
+              </View>
+            </LinearGradient>
 
             {customer.reliability_stars && customer.reliability_stars > 0 ? (
               <StarsRow count={customer.reliability_stars} muted={muted} />
@@ -680,7 +810,15 @@ export default function CustomerDetailScreen() {
             {customer.phone || customer.next_due_at ? (
               <View style={styles.metaRow}>
                 {customer.phone ? (
-                  <View style={styles.metaPill}>
+                  <View
+                    style={[
+                      styles.metaPill,
+                      {
+                        borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.1)",
+                        backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.85)",
+                      },
+                    ]}
+                  >
                     <Ionicons name="call-outline" size={16} color={BakimateColors.accentTeal} />
                     <Text style={[styles.metaText, { color: headline }]} numberOfLines={1}>
                       {customer.phone}
@@ -688,8 +826,16 @@ export default function CustomerDetailScreen() {
                   </View>
                 ) : null}
                 {customer.next_due_at ? (
-                  <View style={styles.metaPill}>
-                    <Ionicons name="calendar-outline" size={16} color={BakimateColors.accentTeal} />
+                  <View
+                    style={[
+                      styles.metaPill,
+                      {
+                        borderColor: isDark ? "rgba(251, 113, 133, 0.35)" : "rgba(248, 113, 113, 0.25)",
+                        backgroundColor: isDark ? "rgba(251, 113, 133, 0.12)" : "rgba(254, 226, 226, 0.7)",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="calendar-outline" size={16} color={BakimateColors.danger} />
                     <Text style={[styles.metaText, { color: headline }]} numberOfLines={1}>
                       {formatCalendarDateShort(customer.next_due_at, i18n.language)}
                     </Text>
@@ -723,25 +869,40 @@ export default function CustomerDetailScreen() {
             />
           </View>
 
-          {/* Secondary actions row: WA remind / share link / QR */}
-          <View style={styles.miniActionRow}>
-            {owes ? (
-              <Pressable
-                onPress={() => {
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                  void onRemind();
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={t("remind_whatsapp")}
-                style={({ pressed }) => [
-                  styles.miniBtn,
-                  { backgroundColor: "#25D366", opacity: pressed ? 0.88 : 1 },
-                ]}
-              >
+          {/* WhatsApp reminder: the one secondary action most shops use */}
+          {owes ? (
+            <Pressable
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                void onRemind();
+              }}
+              disabled={remindBusy}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.remindBtn, { opacity: remindBusy ? 0.6 : pressed ? 0.85 : 1 }]}
+            >
+              {remindBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
                 <Ionicons name="logo-whatsapp" size={26} color="#fff" />
-              </Pressable>
-            ) : null}
+              )}
+              <Text style={styles.remindText}>{t("remind_whatsapp")}</Text>
+            </Pressable>
+          ) : null}
 
+          <Pressable
+            onPress={() => setMoreActionsOpen((v) => !v)}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.moreActionsToggle, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Ionicons name={moreActionsOpen ? "chevron-up" : "chevron-down"} size={20} color={muted} />
+            <Text style={[styles.moreActionsText, { color: muted }]}>
+              {moreActionsOpen ? t("customer_less_options") : t("customer_more_options")}
+            </Text>
+          </Pressable>
+
+          {/* Less-used actions: balance link / QR */}
+          {moreActionsOpen ? (
+          <GlassSurface isDark={isDark} style={styles.quickStrip} contentStyle={styles.quickStripInner}>
             <Pressable
               onPress={() => {
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -751,18 +912,20 @@ export default function CustomerDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel={t("customer_balance_link")}
               style={({ pressed }) => [
-                styles.miniBtn,
-                {
-                  backgroundColor: BakimateColors.accentTeal,
-                  opacity: balanceLinkMu.isPending ? 0.6 : pressed ? 0.88 : 1,
-                },
+                styles.quickItem,
+                { opacity: balanceLinkMu.isPending ? 0.6 : pressed ? 0.82 : 1 },
               ]}
             >
-              {balanceLinkMu.isPending ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Ionicons name="link" size={26} color="#fff" />
-              )}
+              <View style={[styles.quickIcon, { backgroundColor: BakimateColors.accentTeal }]}>
+                {balanceLinkMu.isPending ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Ionicons name="link" size={22} color="#fff" />
+                )}
+              </View>
+              <Text style={[styles.quickLabel, { color: muted }]} numberOfLines={1}>
+                {t("customer_balance_link")}
+              </Text>
             </Pressable>
 
             <Pressable
@@ -772,19 +935,26 @@ export default function CustomerDetailScreen() {
               }}
               accessibilityRole="button"
               accessibilityLabel={t("duitnow_show_qr")}
-              style={({ pressed }) => [
-                styles.miniBtn,
-                {
-                  backgroundColor: isDark ? "rgba(15,23,42,0.7)" : "rgba(255,255,255,0.95)",
-                  borderWidth: 1.5,
-                  borderColor: BakimateColors.accentTeal,
-                  opacity: pressed ? 0.88 : 1,
-                },
-              ]}
+              style={({ pressed }) => [styles.quickItem, { opacity: pressed ? 0.82 : 1 }]}
             >
-              <Ionicons name="qr-code" size={26} color={BakimateColors.accentTeal} />
+              <View
+                style={[
+                  styles.quickIcon,
+                  {
+                    backgroundColor: isDark ? "rgba(46, 196, 182, 0.2)" : "rgba(46, 196, 182, 0.12)",
+                    borderWidth: 1.5,
+                    borderColor: BakimateColors.accentTeal,
+                  },
+                ]}
+              >
+                <Ionicons name="qr-code" size={22} color={BakimateColors.accentTeal} />
+              </View>
+              <Text style={[styles.quickLabel, { color: muted }]} numberOfLines={1}>
+                DuitNow
+              </Text>
             </Pressable>
-          </View>
+          </GlassSurface>
+          ) : null}
 
           <View style={styles.moreSection}>
               {goalRatio !== null ? (
@@ -806,6 +976,141 @@ export default function CustomerDetailScreen() {
                   ) : null}
                 </GlassSurface>
               ) : null}
+
+              {/* Recent credits / payments — A4 PDF per row */}
+              <GlassSurface isDark={isDark} style={styles.card} contentStyle={styles.cardPad}>
+                <View style={styles.cardHeadRow}>
+                  <Ionicons name="list-outline" size={22} color={BakimateColors.accentTeal} />
+                  <Text style={[styles.cardTitle, { color: headline, flex: 1 }]}>{t("customer_recent_tx")}</Text>
+                  <Pressable
+                    onPress={() => setLedgerOpen(true)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("customer_ledger_open")}
+                    style={({ pressed }) => [
+                      styles.ledgerPill,
+                      {
+                        backgroundColor: isDark ? "rgba(46, 196, 182, 0.16)" : "rgba(46, 196, 182, 0.12)",
+                        opacity: pressed ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.ledgerPillText}>{t("customer_ledger_open")}</Text>
+                    <Ionicons name="chevron-forward" size={16} color={BakimateColors.accentTeal} />
+                  </Pressable>
+                </View>
+
+                {recentPreviewTx.length === 0 ? (
+                  <Text style={[styles.cardEmpty, { color: muted }]}>{t("customer_tx_empty")}</Text>
+                ) : (
+                  <View style={{ marginTop: 8, gap: 10 }}>
+                    {recentPreviewTx.map((tx) => {
+                      const isCredit = tx.type === "credit";
+                      const accent = isCredit ? BakimateColors.danger : BakimateColors.success;
+                      const itemLine =
+                        isCredit && tx.item_key?.trim()
+                          ? t("customer_tx_item", { name: tx.item_key.trim() })
+                          : null;
+                      return (
+                        <View
+                          key={tx.id}
+                          style={[
+                            styles.txRow,
+                            {
+                              backgroundColor: isDark ? "rgba(15, 23, 42, 0.55)" : "rgba(255, 255, 255, 0.92)",
+                              borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.08)",
+                              borderLeftColor: accent,
+                            },
+                          ]}
+                        >
+                          <Pressable
+                            onPress={() => openViewLedgerTx(tx)}
+                            accessibilityRole="button"
+                            accessibilityLabel={t("customer_tx_detail_open_a11y")}
+                            style={({ pressed }) => [
+                              styles.txRowMain,
+                              { opacity: pressed ? 0.88 : 1 },
+                            ]}
+                          >
+                            <View style={[styles.txIcon, { backgroundColor: `${accent}24` }]}>
+                              <Ionicons name={isCredit ? "arrow-up" : "arrow-down"} size={22} color={accent} />
+                            </View>
+                            <View style={styles.txBody}>
+                              <Text style={[styles.txTitle, { color: headline }]} numberOfLines={1}>
+                                {isCredit ? t("customer_tx_credit") : t("customer_tx_payment")}
+                              </Text>
+                              {tx.created_at ? (
+                                <Text style={[styles.txDateLine, { color: muted }]}>
+                                  {formatCalendarDateShort(tx.created_at, i18n.language)}
+                                </Text>
+                              ) : null}
+                              {itemLine ? (
+                                <Text style={[styles.txNote, { color: muted }]} numberOfLines={1}>
+                                  {itemLine}
+                                </Text>
+                              ) : null}
+                              {tx.note ? (
+                                <Text style={[styles.txNote, { color: muted }]} numberOfLines={2}>
+                                  {tx.note}
+                                </Text>
+                              ) : null}
+                            </View>
+                            <View style={styles.txAmountCol}>
+                              <Text style={[styles.txAmt, { color: accent }]} numberOfLines={1}>
+                                {isCredit ? "+" : "−"}
+                                {formatMoneyMinor(tx.amount_sen, currency, i18n.language)}
+                              </Text>
+                              <Ionicons name="chevron-forward" size={18} color={muted} />
+                            </View>
+                          </Pressable>
+                          <View
+                            style={[
+                              styles.txPdfDivider,
+                              {
+                                backgroundColor: isDark
+                                  ? "rgba(255,255,255,0.08)"
+                                  : "rgba(15,23,42,0.08)",
+                              },
+                            ]}
+                          />
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={t("customer_tx_pdf_a11y")}
+                            hitSlop={8}
+                            disabled={invoiceBusyId !== null}
+                            onPress={() => void openSingleEntryPdf(tx)}
+                            style={({ pressed }) => [
+                              styles.txPdfPill,
+                              {
+                                borderColor: BakimateColors.accentTeal,
+                                backgroundColor: isDark
+                                  ? "rgba(46, 196, 182, 0.12)"
+                                  : "rgba(46, 196, 182, 0.1)",
+                                opacity: invoiceBusyId === tx.id ? 1 : pressed ? 0.82 : 1,
+                              },
+                            ]}
+                          >
+                            {invoiceBusyId === tx.id ? (
+                              <ActivityIndicator size="small" color={BakimateColors.accentTeal} />
+                            ) : (
+                              <>
+                                <Ionicons
+                                  name="document-text-outline"
+                                  size={18}
+                                  color={BakimateColors.accentTeal}
+                                />
+                                <Text style={[styles.txPdfPillText, { color: BakimateColors.accentTeal }]}>
+                                  {t("customer_tx_pdf_btn")}
+                                </Text>
+                              </>
+                            )}
+                          </Pressable>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </GlassSurface>
 
               {/* Promises */}
               <GlassSurface isDark={isDark} style={styles.card} contentStyle={styles.cardPad}>
@@ -877,163 +1182,6 @@ export default function CustomerDetailScreen() {
                   <Ionicons name="add" size={20} color={BakimateColors.accentTeal} />
                   <Text style={{ fontWeight: "900", color: BakimateColors.accentTeal }}>{t("promise_add")}</Text>
                 </Pressable>
-              </GlassSurface>
-
-              {/* Recent credits / payments — A4 PDF per row */}
-              <GlassSurface isDark={isDark} style={styles.card} contentStyle={styles.cardPad}>
-                <View style={styles.cardHeadRow}>
-                  <Ionicons name="list-outline" size={22} color={BakimateColors.accentTeal} />
-                  <Text style={[styles.cardTitle, { color: headline }]}>{t("customer_recent_tx")}</Text>
-                </View>
-
-                {(customer.recent_transactions ?? []).length === 0 ? (
-                  <Text style={[styles.cardEmpty, { color: muted }]}>{t("customer_tx_empty")}</Text>
-                ) : (
-                  <View style={{ marginTop: 8, gap: 10 }}>
-                    {(customer.recent_transactions ?? []).map((tx) => {
-                      const isCredit = tx.type === "credit";
-                      const accent = isCredit ? BakimateColors.danger : BakimateColors.success;
-                      const itemLine =
-                        isCredit && tx.item_key?.trim()
-                          ? t("customer_tx_item", { name: tx.item_key.trim() })
-                          : null;
-                      return (
-                        <View
-                          key={tx.id}
-                          style={[
-                            styles.txRow,
-                            {
-                              backgroundColor: isDark ? "rgba(15, 23, 42, 0.45)" : "rgba(255, 255, 255, 0.65)",
-                              borderColor: isDark ? BakimateColors.glassBorderDark : "rgba(15,23,42,0.1)",
-                            },
-                          ]}
-                        >
-                          <View style={[styles.txIcon, { backgroundColor: `${accent}1F` }]}>
-                            <Ionicons name={isCredit ? "arrow-up" : "arrow-down"} size={20} color={accent} />
-                          </View>
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text style={[styles.txTitle, { color: headline }]} numberOfLines={1}>
-                              {isCredit ? t("customer_tx_credit") : t("customer_tx_payment")}
-                            </Text>
-                            {itemLine ? (
-                              <Text style={[styles.txNote, { color: muted }]} numberOfLines={1}>
-                                {itemLine}
-                              </Text>
-                            ) : null}
-                            {tx.note ? (
-                              <Text style={[styles.txNote, { color: muted }]} numberOfLines={2}>
-                                {tx.note}
-                              </Text>
-                            ) : null}
-                            {tx.created_at ? (
-                              <Text style={[styles.txDate, { color: muted }]}>
-                                {formatCalendarDateShort(tx.created_at, i18n.language)}
-                              </Text>
-                            ) : null}
-                          </View>
-                          <View style={styles.txTrailingCol}>
-                            <View style={styles.txAmtRow}>
-                              <Text style={[styles.txAmt, { color: accent }]}>
-                                {isCredit ? "+" : "−"}
-                                {formatMoneyMinor(tx.amount_sen, currency, i18n.language)}
-                              </Text>
-                              <View style={styles.txLedgerIconActions}>
-                                <Pressable
-                                  accessibilityRole="button"
-                                  accessibilityLabel={
-                                    isCredit
-                                      ? t("customer_tx_edit_credit_a11y")
-                                      : t("customer_tx_edit_payment_a11y")
-                                  }
-                                  hitSlop={12}
-                                  disabled={invoiceBusyId !== null || deleteLedgerTxMu.isPending}
-                                  onPress={() => openEditLedgerTx(tx)}
-                                  style={({ pressed }) => [
-                                    styles.txIconActionWrap,
-                                    {
-                                      backgroundColor: isCredit
-                                        ? isDark
-                                          ? `${BakimateColors.danger}20`
-                                          : `${BakimateColors.danger}16`
-                                        : isDark
-                                          ? `${BakimateColors.success}20`
-                                          : `${BakimateColors.success}16`,
-                                      opacity: pressed ? 0.78 : 1,
-                                    },
-                                  ]}
-                                >
-                                  <Ionicons
-                                    name="create-outline"
-                                    size={20}
-                                    color={isCredit ? BakimateColors.danger : BakimateColors.success}
-                                  />
-                                </Pressable>
-                                <Pressable
-                                  accessibilityRole="button"
-                                  accessibilityLabel={
-                                    isCredit
-                                      ? t("customer_tx_delete_credit_a11y")
-                                      : t("customer_tx_delete_payment_a11y")
-                                  }
-                                  hitSlop={12}
-                                  disabled={invoiceBusyId !== null || deleteLedgerTxMu.isPending}
-                                  onPress={() => {
-                                    if (!requirePremium()) return;
-                                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                                    confirmDeleteLedgerTx(tx);
-                                  }}
-                                  style={({ pressed }) => [
-                                    styles.txIconActionWrap,
-                                    {
-                                      backgroundColor: isDark
-                                        ? `${BakimateColors.danger}22`
-                                        : `${BakimateColors.danger}18`,
-                                      opacity: pressed ? 0.78 : 1,
-                                    },
-                                  ]}
-                                >
-                                  <Ionicons name="trash-outline" size={20} color={BakimateColors.danger} />
-                                </Pressable>
-                              </View>
-                            </View>
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel={t("customer_tx_pdf_a11y")}
-                              hitSlop={8}
-                              disabled={invoiceBusyId !== null}
-                              onPress={() => void openSingleEntryPdf(tx)}
-                              style={({ pressed }) => [
-                                styles.txPdfPill,
-                                {
-                                  borderColor: BakimateColors.accentTeal,
-                                  backgroundColor: isDark
-                                    ? "rgba(46, 196, 182, 0.12)"
-                                    : "rgba(46, 196, 182, 0.1)",
-                                  opacity: invoiceBusyId === tx.id ? 1 : pressed ? 0.82 : 1,
-                                },
-                              ]}
-                            >
-                              {invoiceBusyId === tx.id ? (
-                                <ActivityIndicator size="small" color={BakimateColors.accentTeal} />
-                              ) : (
-                                <>
-                                  <Ionicons
-                                    name="document-text-outline"
-                                    size={18}
-                                    color={BakimateColors.accentTeal}
-                                  />
-                                  <Text style={[styles.txPdfPillText, { color: BakimateColors.accentTeal }]}>
-                                    {t("customer_tx_pdf_btn")}
-                                  </Text>
-                                </>
-                              )}
-                            </Pressable>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
               </GlassSurface>
 
               {/* Documents */}
@@ -1174,12 +1322,52 @@ export default function CustomerDetailScreen() {
           isDark={isDark}
           quickItems={quickItems}
           duitnowQrUrl={duitnowQrUrl || null}
+          premiumAccess={premiumRecording.data}
           onClose={() => {
             setSheetType(null);
             setEditingTx(null);
           }}
           onOpenDuitnowQr={openDuitnowQr}
           onSaved={() => void refetch()}
+        />
+      ) : null}
+
+      {customer ? (
+        <CustomerLedgerSheet
+          visible={ledgerOpen}
+          customerId={customer.id}
+          customerName={customer.name}
+          currencyCode={currency}
+          isDark={isDark}
+          pdfBusyId={invoiceBusyId}
+          actionsDisabled={deleteLedgerTxMu.isPending}
+          onClose={() => setLedgerOpen(false)}
+          onEditTx={(tx) => openEditLedgerTx(tx)}
+          onDeleteTx={(tx) => {
+            if (!requirePremium()) return;
+            confirmDeleteLedgerTx(tx);
+          }}
+          onSharePdf={(tx) => void openSingleEntryPdf(tx)}
+        />
+      ) : null}
+
+      {customer && viewingTx ? (
+        <CustomerTransactionDetailSheet
+          visible={viewingTx !== null}
+          tx={viewingTx}
+          customerName={customer.name}
+          currencyCode={currency}
+          isDark={isDark}
+          pdfBusy={invoiceBusyId === viewingTx.id}
+          actionsDisabled={deleteLedgerTxMu.isPending}
+          onClose={() => setViewingTx(null)}
+          onEdit={() => openEditLedgerTx(viewingTx)}
+          onDelete={() => {
+            setViewingTx(null);
+            if (!requirePremium()) return;
+            confirmDeleteLedgerTx(viewingTx);
+          }}
+          onSharePdf={() => void openSingleEntryPdf(viewingTx)}
         />
       ) : null}
 
@@ -1309,22 +1497,87 @@ const styles = StyleSheet.create({
 
   scrollPad: { paddingHorizontal: 20, paddingBottom: 60, flexGrow: 1 },
 
-  heroWrap: { alignItems: "center", paddingTop: 4, paddingBottom: 16 },
-  photoFrame: { position: "relative" },
+  heroWrap: { alignItems: "center", paddingTop: 8, paddingBottom: 18, width: "100%" },
+  heroGlow: {
+    position: "absolute",
+    top: 0,
+    left: -20,
+    right: -20,
+    height: 220,
+    borderRadius: 999,
+  },
+  avatarRing: {
+    padding: 3,
+    borderRadius: 999,
+    ...Platform.select({
+      ios: {
+        shadowColor: BakimateColors.danger,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.35,
+        shadowRadius: 16,
+      },
+      android: { elevation: 6 },
+      default: {},
+    }),
+  },
+  avatarInner: {
+    position: "relative",
+    borderRadius: 999,
+    padding: 4,
+    overflow: "visible",
+  },
+  balanceCard: {
+    width: "100%",
+    marginTop: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    borderRadius: 22,
+    borderWidth: 1,
+    alignItems: "center",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#0f172a",
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.12,
+        shadowRadius: 20,
+      },
+      android: { elevation: 3 },
+      default: {},
+    }),
+  },
+  balanceStatusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  balanceStatusDot: { width: 7, height: 7, borderRadius: 4 },
   photoEditBadge: {
     position: "absolute",
-    right: -2,
-    bottom: -2,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    right: 6,
+    bottom: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#fff",
+    borderWidth: 2.5,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.28,
+        shadowRadius: 4,
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
-  heroName: { marginTop: 14, fontSize: 24, fontWeight: "900", textAlign: "center", letterSpacing: -0.4 },
-  heroStatus: { marginTop: 6, fontSize: 13, fontWeight: "800", letterSpacing: 0.3, textTransform: "uppercase" },
+  heroName: { marginTop: 16, fontSize: 26, fontWeight: "900", textAlign: "center", letterSpacing: -0.5 },
+  heroStatus: { fontSize: 13, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase" },
 
   starRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
 
@@ -1338,11 +1591,11 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
-  syncText: { fontSize: 12, fontWeight: "800" },
+  syncText: { fontSize: 14, fontWeight: "800" },
   syncHint: {
     marginTop: 8,
     paddingHorizontal: 12,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "600",
     textAlign: "center",
     lineHeight: 18,
@@ -1371,34 +1624,63 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 999,
-    backgroundColor: "rgba(46, 196, 182, 0.12)",
+    borderWidth: 1,
   },
   metaText: { fontSize: 13, fontWeight: "800" },
 
-  actionRow: { flexDirection: "row", gap: 12, marginTop: 6, marginBottom: 14 },
+  actionRow: { flexDirection: "row", gap: 12, marginTop: 4, marginBottom: 12 },
   actionBtn: { flex: 1 },
 
-  miniActionRow: { flexDirection: "row", gap: 12, justifyContent: "center", marginBottom: 10 },
-  miniBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
+  remindBtn: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#0f172a",
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.18,
-        shadowRadius: 12,
-      },
-      android: { elevation: 4 },
-      default: {},
-    }),
+    gap: 10,
+    backgroundColor: "#25D366",
+    borderRadius: 18,
+    paddingVertical: 16,
+    marginBottom: 6,
   },
+  remindText: { color: "#fff", fontSize: 17, fontWeight: "900" },
+  moreActionsToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    marginBottom: 6,
+  },
+  moreActionsText: { fontSize: 15, fontWeight: "800" },
+  quickStrip: { marginBottom: 14 },
+  quickStripInner: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "flex-start",
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+  },
+  quickItem: { alignItems: "center", gap: 8, minWidth: 72, maxWidth: 110 },
+  quickIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickLabel: { fontSize: 13, fontWeight: "800", textAlign: "center" },
+
+  ledgerPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  ledgerPillText: { color: BakimateColors.accentTeal, fontWeight: "800", fontSize: 13 },
 
   moreSection: { gap: 12, marginTop: 12 },
 
@@ -1407,7 +1689,7 @@ const styles = StyleSheet.create({
   cardHeadRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   cardTitle: { fontSize: 17, fontWeight: "900" },
   cardEmpty: { fontSize: 13, fontWeight: "700" },
-  cardFoot: { fontSize: 12, fontWeight: "700", lineHeight: 17 },
+  cardFoot: { fontSize: 14, fontWeight: "700", lineHeight: 17 },
   cardAddBtn: {
     marginTop: 10,
     flexDirection: "row",
@@ -1430,7 +1712,7 @@ const styles = StyleSheet.create({
   },
   promiseDot: { width: 10, height: 28, borderRadius: 4 },
   promiseAmt: { fontWeight: "900", fontSize: 16 },
-  promiseMeta: { marginTop: 2, fontSize: 12, fontWeight: "700" },
+  promiseMeta: { marginTop: 2, fontSize: 14, fontWeight: "700" },
 
   docRow: { flexDirection: "row", gap: 10, marginTop: 6 },
   docBtn: {
@@ -1443,52 +1725,67 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 8,
   },
-  docBtnText: { fontSize: 12, fontWeight: "900", textAlign: "center" },
+  docBtnText: { fontSize: 14, fontWeight: "900", textAlign: "center" },
 
   txRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 14,
+    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: 3,
+    paddingTop: 12,
+    paddingBottom: 10,
+    paddingHorizontal: 12,
+    gap: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#0f172a",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+      },
+      android: { elevation: 1 },
+      default: {},
+    }),
   },
-  txTrailingCol: { alignItems: "flex-end", gap: 6 },
-  txAmtRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" },
-  txLedgerIconActions: { flexDirection: "row", alignItems: "center", gap: 6 },
-  txIconActionWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    alignItems: "center",
+  txRowMain: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  txBody: { flex: 1, minWidth: 0, gap: 2 },
+  txAmountCol: {
+    alignItems: "flex-end",
     justifyContent: "center",
+    gap: 6,
+    flexShrink: 0,
+    maxWidth: "42%",
   },
-  txIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  txTitle: { fontWeight: "900", fontSize: 14 },
-  txNote: { marginTop: 2, fontSize: 12, fontWeight: "600" },
-  txDate: { marginTop: 2, fontSize: 11, fontWeight: "700" },
-  txAmt: { fontWeight: "900", fontSize: 14 },
+  txDateLine: { fontSize: 14, fontWeight: "700", marginTop: 1 },
+  txPdfDivider: { height: StyleSheet.hairlineWidth, marginTop: 2 },
   txPdfPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1.5,
-    minWidth: 88,
-    justifyContent: "center",
+    alignSelf: "stretch",
   },
-  txPdfPillText: { fontWeight: "900", fontSize: 12 },
+  txPdfPillText: { fontWeight: "900", fontSize: 13 },
+  txIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  txTitle: { fontWeight: "900", fontSize: 15 },
+  txNote: { marginTop: 2, fontSize: 14, fontWeight: "600", lineHeight: 17 },
+  txAmt: { fontWeight: "900", fontSize: 15, letterSpacing: -0.3, textAlign: "right" },
 
-  label: { fontSize: 12, fontWeight: "800", marginBottom: 6, marginTop: 8 },
+  label: { fontSize: 14, fontWeight: "800", marginBottom: 6, marginTop: 8 },
   input: { borderWidth: 1, borderRadius: 12, padding: 12, fontWeight: "600", fontSize: 16 },
 
   promisePresets: { flexDirection: "row", gap: 8, marginTop: 6, marginBottom: 4 },

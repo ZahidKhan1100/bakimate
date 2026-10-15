@@ -1,12 +1,18 @@
+import { PickCustomerSheet } from "@/components/pick-customer-sheet";
+import { BigActionButton } from "@/components/ui/big-action-button";
 import { GlassSurface } from "@/components/ui/glass-surface";
 import { MeshBackdrop } from "@/components/ui/mesh-backdrop";
 import { MoneyDisplay } from "@/components/ui/money-display";
-import { PersonRow } from "@/components/ui/person-row";
+import { PriorityCustomerRow } from "@/components/priority-customer-row";
 import { ScreenHeroHeader } from "@/components/ui/screen-hero-header";
 import { SignInHero } from "@/components/ui/sign-in-hero";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { presentRewardedAdGate } from "@/lib/ads/rewarded-ad-gate";
+import { MONETIZATION_ENABLED } from "@/lib/monetization";
+import { usePremiumRecordingAccess } from "@/lib/hooks/usePremiumRecordingAccess";
+import { usePullToRefresh } from "@/lib/hooks/usePullToRefresh";
 import { useReportSummary } from "@/lib/hooks/useReportSummary";
 import { useShopCurrency } from "@/lib/hooks/useShopCurrency";
 import { profileToReceiptBlurb, resolveShopProfile } from "@/lib/shop-profile";
@@ -18,6 +24,7 @@ import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -27,9 +34,9 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import { Text } from "@/components/ui/text";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 /** Scroll clears the floating tab bar; height comes from the navigator after safe-area tweak. */
@@ -44,12 +51,15 @@ export default function HomeScreen() {
   const user = useSessionStore((s) => s.user);
 
   const summaryQ = useReportSummary({ enabled: Boolean(token) });
+  const premiumRecording = usePremiumRecordingAccess(Boolean(token));
+  const pullRefresh = usePullToRefresh(() => summaryQ.refetch());
   const s = summaryQ.data;
 
   const shopLocal = resolveShopProfile(shopProfiles, user?.id);
   const currency = useShopCurrency();
 
   const tabBarHeight = useBottomTabBarHeight();
+  const [pickMode, setPickMode] = useState<"credit" | "payment" | null>(null);
 
   const headline = Colors[theme].text;
   const muted = isDark ? BakimateColors.neutralTextMutedDark : BakimateColors.neutralText;
@@ -62,9 +72,11 @@ export default function HomeScreen() {
       row.balance_sen,
       profileToReceiptBlurb(shopLocal),
     );
-    void openWhatsAppText(msg, row.phone).catch(() => {
-      Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
-    });
+    void presentRewardedAdGate(premiumRecording.data)
+      .then(() => openWhatsAppText(msg, row.phone))
+      .catch(() => {
+        Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
+      });
   };
 
   return (
@@ -76,8 +88,8 @@ export default function HomeScreen() {
           refreshControl={
             token ? (
               <RefreshControl
-                refreshing={summaryQ.isRefetching}
-                onRefresh={() => void summaryQ.refetch()}
+                refreshing={pullRefresh.refreshing}
+                onRefresh={pullRefresh.onRefresh}
                 tintColor={BakimateColors.accentTeal}
               />
             ) : undefined
@@ -155,6 +167,26 @@ export default function HomeScreen() {
                 </View>
               </GlassSurface>
 
+              {/* Record shortcuts: pick a customer, then land in their record sheet */}
+              <View style={styles.recordRow}>
+                <BigActionButton
+                  onPress={() => setPickMode("credit")}
+                  icon="arrow-up"
+                  variant="danger"
+                  size="xl"
+                  label={t("quick_gave")}
+                  style={styles.recordBtn}
+                />
+                <BigActionButton
+                  onPress={() => setPickMode("payment")}
+                  icon="arrow-down"
+                  variant="success"
+                  size="xl"
+                  label={t("quick_got")}
+                  style={styles.recordBtn}
+                />
+              </View>
+
               {/* BakiScore — frosted + accent stripe */}
               {(() => {
                 const bk = s.bakiscore ?? { score: 100, tier: "strong" as const, label: "", avg_risk: 0 };
@@ -205,9 +237,50 @@ export default function HomeScreen() {
                 );
               })()}
 
-              {/* Priority — titled glass panel */}
-              <Text style={[styles.sectionLabel, { color: muted }]}>{t("dash_priority_title")}</Text>
-              <GlassSurface isDark={isDark} style={styles.priorityGlass} contentStyle={styles.priorityGlassInner}>
+              {/* Priority — call today */}
+              <View style={styles.priorityHeader}>
+                <View style={styles.priorityHeaderLeft}>
+                  <View
+                    style={[
+                      styles.priorityHeaderIcon,
+                      {
+                        backgroundColor: isDark ? "rgba(251, 146, 60, 0.15)" : "rgba(234, 88, 12, 0.12)",
+                        borderColor: isDark ? "rgba(251, 146, 60, 0.35)" : "rgba(234, 88, 12, 0.28)",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="call" size={16} color={isDark ? "#FB923C" : BakimateColors.danger} />
+                  </View>
+                  <Text style={[styles.priorityHeaderTitle, { color: headline }]}>
+                    {t("dash_priority_title")}
+                  </Text>
+                </View>
+                {(s.priority_customers ?? []).length > 0 ? (
+                  <View
+                    style={[
+                      styles.priorityCountBadge,
+                      {
+                        backgroundColor: isDark ? "rgba(251, 146, 60, 0.2)" : "rgba(234, 88, 12, 0.12)",
+                        borderColor: isDark ? "rgba(251, 146, 60, 0.4)" : "rgba(234, 88, 12, 0.3)",
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.priorityCountText, { color: isDark ? "#FB923C" : BakimateColors.danger }]}>
+                      {(s.priority_customers ?? []).length}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+              <GlassSurface
+                isDark={isDark}
+                style={[
+                  styles.priorityGlass,
+                  {
+                    borderColor: isDark ? "rgba(251, 146, 60, 0.22)" : "rgba(234, 88, 12, 0.18)",
+                  },
+                ]}
+                contentStyle={styles.priorityGlassInner}
+              >
                 {(s.priority_customers ?? []).length === 0 ? (
                   <View style={[styles.emptyWrap, { backgroundColor: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.5)" }]}>
                     <Ionicons name="checkmark-circle" size={40} color={BakimateColors.success} />
@@ -215,36 +288,22 @@ export default function HomeScreen() {
                   </View>
                 ) : (
                   <View>
-                    {(s.priority_customers ?? []).map((row) => (
-                      <PersonRow
+                    {(s.priority_customers ?? []).map((row, index, arr) => (
+                      <PriorityCustomerRow
                         key={row.id}
                         id={row.id}
                         name={row.name}
                         balanceSen={row.balance_sen}
                         currencyCode={currency}
                         isDark={isDark}
-                        kind="customer"
-                        onPress={() => router.push(`/customer/${row.id}`)}
-                        subline={
+                        isLast={index === arr.length - 1}
+                        overdueLabel={
                           typeof row.days_overdue === "number"
                             ? t("dash_days_overdue", { count: row.days_overdue })
                             : undefined
                         }
-                        sublineTone={typeof row.days_overdue === "number" ? "danger" : "muted"}
-                        trailingAction={
-                          <Pressable
-                            onPress={() => nudge(row)}
-                            accessibilityRole="button"
-                            accessibilityLabel={t("remind_whatsapp")}
-                            style={({ pressed }) => [
-                              styles.nudgeBtn,
-                              { backgroundColor: "#25D366", opacity: pressed ? 0.85 : 1 },
-                            ]}
-                            hitSlop={8}
-                          >
-                            <Ionicons name="logo-whatsapp" size={22} color="#fff" />
-                          </Pressable>
-                        }
+                        onPress={() => router.push(`/customer/${row.id}`)}
+                        onWhatsApp={() => nudge(row)}
                       />
                     ))}
                   </View>
@@ -255,7 +314,7 @@ export default function HomeScreen() {
               <View style={styles.quickRow}>
                 <Pressable
                   style={({ pressed }) => [styles.pillPrimary, { opacity: pressed ? 0.92 : 1 }]}
-                  onPress={() => router.push("/customers")}
+                  onPress={() => router.push("/insights")}
                 >
                   <LinearGradient
                     colors={[BakimateColors.primary, "#006848"]}
@@ -263,11 +322,12 @@ export default function HomeScreen() {
                     end={{ x: 1, y: 1 }}
                     style={styles.pillPrimaryFill}
                   >
-                    <Ionicons name="people" size={22} color="#fff" />
-                    <Text style={styles.pillText}>{t("tab_customers")}</Text>
+                    <Ionicons name="bar-chart" size={22} color="#fff" />
+                    <Text style={styles.pillText}>{t("home_weekly_report")}</Text>
                   </LinearGradient>
                 </Pressable>
 
+                {MONETIZATION_ENABLED ? (
                 <Pressable
                   style={({ pressed }) => [styles.pillGlass, { opacity: pressed ? 0.9 : 1 }]}
                   onPress={() => router.push("/paywall")}
@@ -286,11 +346,22 @@ export default function HomeScreen() {
                     <Text style={[styles.pillGlassText, { color: BakimateColors.accentTeal }]}>{t("paywall_title")}</Text>
                   </LinearGradient>
                 </Pressable>
+                ) : null}
               </View>
             </>
           ) : null}
         </ScrollView>
       </SafeAreaView>
+
+      <PickCustomerSheet
+        mode={pickMode}
+        isDark={isDark}
+        onClose={() => setPickMode(null)}
+        onPick={(customerId, mode) => {
+          setPickMode(null);
+          router.push({ pathname: "/customer/[id]", params: { id: String(customerId), record: mode } });
+        }}
+      />
     </View>
   );
 }
@@ -307,7 +378,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignSelf: "flex-start",
   },
-  currencyChipText: { fontSize: 12, fontWeight: "900", letterSpacing: 1.2 },
+  currencyChipText: { fontSize: 14, fontWeight: "900", letterSpacing: 1.2 },
 
   statsGlass: { marginBottom: 18 },
   statsGlassInner: { padding: 20 },
@@ -323,7 +394,10 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statDivider: { width: StyleSheet.hairlineWidth, marginHorizontal: 4 },
-  statLabel: { fontSize: 11, fontWeight: "800", letterSpacing: 0.35, lineHeight: 15 },
+  statLabel: { fontSize: 13, fontWeight: "800", letterSpacing: 0.35, lineHeight: 15 },
+
+  recordRow: { flexDirection: "row", gap: 12, marginBottom: 18 },
+  recordBtn: { flex: 1 },
 
   scoreGlass: { marginBottom: 20 },
   scoreGlassInner: { paddingVertical: 18, paddingHorizontal: 18, paddingLeft: 22, position: "relative", overflow: "hidden" },
@@ -348,7 +422,7 @@ const styles = StyleSheet.create({
   scoreCaption: { fontSize: 13, fontWeight: "700", lineHeight: 18 },
 
   sectionLabel: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "900",
     letterSpacing: 2,
     textTransform: "uppercase",
@@ -356,8 +430,35 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
+  priorityHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  priorityHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
+  priorityHeaderIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  priorityHeaderTitle: { fontSize: 17, fontWeight: "900", letterSpacing: -0.3 },
+  priorityCountBadge: {
+    minWidth: 28,
+    height: 28,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  priorityCountText: { fontSize: 14, fontWeight: "900" },
   priorityGlass: { marginBottom: 6 },
-  priorityGlassInner: { padding: 14 },
+  priorityGlassInner: { paddingHorizontal: 14, paddingVertical: 4 },
 
   emptyWrap: {
     alignItems: "center",
@@ -368,14 +469,6 @@ const styles = StyleSheet.create({
   },
   emptyText: { fontSize: 14, fontWeight: "800", textAlign: "center", lineHeight: 20 },
 
-  nudgeBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 4,
-  },
 
   quickRow: { flexDirection: "row", gap: 12, marginTop: 22 },
   pillPrimary: {

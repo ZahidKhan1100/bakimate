@@ -1,3 +1,4 @@
+import { ensureVoiceSpeechPermissions } from "@/lib/voice-speech-permissions";
 import Constants, { AppOwnership } from "expo-constants";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { useCallback, useRef, useState } from "react";
@@ -15,7 +16,7 @@ type Params = {
 export function useVoiceLedgerCapture({ locale, contextualStrings, onInterim }: Params) {
   const [listening, setListening] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState("");
-  const interimRef = useRef("");
+  const latestTranscriptRef = useRef("");
   const finalResolver = useRef<((text: string) => void) | null>(null);
 
   const speechAvailable =
@@ -26,9 +27,11 @@ export function useVoiceLedgerCapture({ locale, contextualStrings, onInterim }: 
     if (!t) {
       return;
     }
+    latestTranscriptRef.current = t;
     if (event.isFinal) {
       setInterimTranscript("");
       onInterim?.("");
+      latestTranscriptRef.current = "";
       finalResolver.current?.(t);
       finalResolver.current = null;
     } else {
@@ -37,22 +40,33 @@ export function useVoiceLedgerCapture({ locale, contextualStrings, onInterim }: 
     }
   });
 
-  useSpeechRecognitionEvent("error", () => {
+  useSpeechRecognitionEvent("error", (event) => {
     setListening(false);
     setInterimTranscript("");
-    finalResolver.current?.("");
-    finalResolver.current = null;
+    latestTranscriptRef.current = "";
+    if (finalResolver.current) {
+      finalResolver.current("");
+      finalResolver.current = null;
+    }
+    const msg = event.message?.trim();
+    if (msg && event.error !== "aborted" && event.error !== "no-speech") {
+      Alert.alert("Voice recognition", msg);
+    }
   });
 
   useSpeechRecognitionEvent("end", () => {
     setListening(false);
     if (finalResolver.current) {
-      finalResolver.current(interimRef.current.trim());
+      const fallback = latestTranscriptRef.current.trim();
+      finalResolver.current(fallback);
       finalResolver.current = null;
+      setInterimTranscript("");
+      latestTranscriptRef.current = "";
     }
   });
 
-  const listenOnce = useCallback(async (): Promise<string> => {
+  const listenOnce = useCallback(async (localeOverride?: string): Promise<string> => {
+    const lang = localeOverride ?? locale;
     if (!speechAvailable) {
       Alert.alert("Voice", "Use a development or production build with speech recognition (not Expo Go).");
       return "";
@@ -68,21 +82,26 @@ export function useVoiceLedgerCapture({ locale, contextualStrings, onInterim }: 
             return;
           }
 
-          const p = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-          if (!p.granted) {
-            Alert.alert(
-              "Microphone / speech",
-              "Grant microphone and speech recognition in Settings to record by voice.",
-            );
+          const ok = await ensureVoiceSpeechPermissions();
+          if (!ok) {
             resolve("");
             return;
           }
 
+          if (Platform.OS === "ios") {
+            ExpoSpeechRecognitionModule.setAudioSessionActiveIOS(true, {
+              notifyOthersOnDeactivation: true,
+            });
+          }
+
           finalResolver.current = resolve;
           setInterimTranscript("");
+          latestTranscriptRef.current = "";
           ExpoSpeechRecognitionModule.start({
-            lang: locale,
+            lang,
             interimResults: true,
+            continuous: false,
+            iosTaskHint: "confirmation",
             contextualStrings: contextualStrings?.length ? contextualStrings : undefined,
           });
           setListening(true);
@@ -98,10 +117,11 @@ export function useVoiceLedgerCapture({ locale, contextualStrings, onInterim }: 
 
   const cancelListening = useCallback(() => {
     if (listening) {
-      ExpoSpeechRecognitionModule.stop();
+      ExpoSpeechRecognitionModule.abort();
     }
     setListening(false);
     setInterimTranscript("");
+    latestTranscriptRef.current = "";
     finalResolver.current?.("");
     finalResolver.current = null;
   }, [listening]);
@@ -113,4 +133,4 @@ export function useVoiceLedgerCapture({ locale, contextualStrings, onInterim }: 
     listenOnce,
     cancelListening,
   };
-}
+};

@@ -1,12 +1,11 @@
 import { Platform } from "react-native";
 import Purchases from "react-native-purchases";
 
-import { PremiumRecordingBlockedError } from "@/lib/errors/premium-recording-blocked-error";
 import { Qk } from "@/lib/hooks/query-keys";
+import { MONETIZATION_ENABLED } from "@/lib/monetization";
 import { ensureRevenueCatConfigured } from "@/lib/revenuecat-configure";
 import { queryClient } from "@/lib/query-client";
 import { getNativeRevenueCatApiKey, getPremiumEntitlementIdentifier } from "@/lib/revenuecat-settings";
-import { fetchIsDeviceOffline } from "@/lib/network-offline";
 import { fetchShopProfile } from "@/lib/shop-api";
 
 /** Result shared by TanStack Query and the recording mutation gate. */
@@ -41,6 +40,10 @@ async function fetchServerSubscriptionActive(): Promise<boolean> {
  * Merges RevenueCat entitlements with the server shop subscription (`subscription_active` includes signup trial until `subscription_expires_at`).
  */
 export async function fetchPremiumRecordingAccess(): Promise<PremiumRecordingAccess> {
+  if (!MONETIZATION_ENABLED) {
+    return { requiresPremium: false, entitled: true };
+  }
+
   if (Platform.OS === "web") {
     return { requiresPremium: false, entitled: false };
   }
@@ -82,15 +85,7 @@ export async function fetchPremiumRecordingAccess(): Promise<PremiumRecordingAcc
   }
 }
 
+/** Recording credits/payments is never subscription-gated — only WhatsApp report sharing is (see rewarded-ad-gate.ts). */
 export async function assertRecordingPremiumOrThrow(): Promise<void> {
-  /** Queue-first offline recording: enforce subscription when we can reach the server, not on-device only. */
-  if (await fetchIsDeviceOffline()) {
-    return;
-  }
-
-  const s = await fetchPremiumRecordingAccess();
-
-  if (s.requiresPremium && !s.entitled) {
-    throw new PremiumRecordingBlockedError();
-  }
+  return;
 }

@@ -1,3 +1,5 @@
+import { intlLocaleFor } from "@/lib/format-dates";
+
 /** Curated ISO 4217 codes for shop ledger selection (sorted A–Z). */
 const RAW = [
   "AED",
@@ -51,7 +53,7 @@ export function currencyNameOnly(code: string, localeHint: string): string {
   if (!/^[A-Z]{3}$/.test(c)) {
     return "";
   }
-  const loc = localeHint.startsWith("ms") ? "ms-MY" : "en-MY";
+  const loc = intlLocaleFor(localeHint);
   try {
     return new Intl.DisplayNames([loc], { type: "currency" }).of(c) ?? c;
   } catch {

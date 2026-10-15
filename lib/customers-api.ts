@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import type { Customer, LaravelPaginator } from "@/lib/api-types";
+import type { Customer, CustomerLedgerTransactionApi, LaravelPaginator } from "@/lib/api-types";
 
 export async function fetchCustomersPage(page = 1): Promise<LaravelPaginator<Customer>> {
   const { data } = await api.get<LaravelPaginator<Customer>>("/customers", {
@@ -39,6 +39,28 @@ export async function rotateCustomerBalancePublicLink(
   const { data } = await api.post<{ url: string; path?: string }>(
     `/customers/${customerId}/balance-public-link`,
     {},
+  );
+  return data;
+}
+
+export type CustomerLedgerResponse = {
+  customer_id: number;
+  month: string | null;
+  transactions: CustomerLedgerTransactionApi[];
+  totals: {
+    credit_given_sen: number;
+    payments_collected_sen: number;
+  };
+};
+
+export async function fetchCustomerLedger(
+  customerId: number,
+  month?: string | null,
+): Promise<CustomerLedgerResponse> {
+  const params = month ? { month } : undefined;
+  const { data } = await api.get<CustomerLedgerResponse>(
+    `/customers/${customerId}/transactions`,
+    { params },
   );
   return data;
 }

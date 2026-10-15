@@ -20,9 +20,9 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import { Text } from "@/components/ui/text";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const POLL_MS = 8000;

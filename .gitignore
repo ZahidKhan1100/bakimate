@@ -49,3 +49,6 @@ app-example
 *.apk
 *.aab
 *.ipa
+
+# Marketing assets (videos, pamphlets, voiceovers) — kept local, not in the code repo
+marketing/

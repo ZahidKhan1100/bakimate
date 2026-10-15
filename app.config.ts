@@ -55,8 +55,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   const androidNext: ExpoConfig["android"] = {
     ...(prevAndroid as NonNullable<ExpoConfig["android"]>),
-    /** Must exceed every versionCode already uploaded to Play (e.g. 9 for 1.0.0, 3 for an internal build). */
-    versionCode: 10,
+    /** versionCode comes from app.json — bump it before each Play upload (must be > last uploaded). */
     intentFilters: hasOauthPkgFilter
       ? existingIntentFilters
       : [...existingIntentFilters, oauthAndroidRedirectIntentFilter(androidPkg)],
@@ -82,11 +81,20 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           android: ["com.whatsapp", "com.whatsapp.w4b"],
         },
       ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          /** Google's public test App IDs — swap for real ones (AdMob → App settings) via env before a real build. */
+          androidAppId: (process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID ?? "").trim() || "ca-app-pub-3940256099942544~3347511713",
+          iosAppId: (process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID ?? "").trim() || "ca-app-pub-3940256099942544~1458002511",
+        },
+      ],
       ...(Array.isArray(config.plugins) ? config.plugins : []),
       "expo-notifications",
       "expo-speech-recognition",
       "expo-sqlite",
       "./plugins/with-disable-ios-user-script-sandbox",
+      "./plugins/with-android-kotlin-skip-metadata-check",
       /** Copies `storekit/BakiMate.storekit` and patches Run scheme unless `BAKIMATE_SKIP_STOREKIT_SCHEME=1` (Sandbox). */
       "./plugins/with-bakimate-storekit-testing",
     ],
@@ -117,6 +125,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       revenueCatOfferingId:
         (process.env.EXPO_PUBLIC_REVENUECAT_OFFERING_ID ?? "").trim() ||
         (typeof prevExtra.revenueCatOfferingId === "string" ? prevExtra.revenueCatOfferingId.trim() : ""),
+      /** AdMob rewarded ad unit IDs (AdMob → Ad units). Empty ⇒ `lib/ads/admob-settings.ts` falls back to Google's test unit ID. */
+      admobAndroidRewardedUnitId:
+        (process.env.EXPO_PUBLIC_ADMOB_ANDROID_REWARDED_UNIT_ID ?? "").trim() ||
+        String(prevExtra.admobAndroidRewardedUnitId ?? ""),
+      admobIosRewardedUnitId:
+        (process.env.EXPO_PUBLIC_ADMOB_IOS_REWARDED_UNIT_ID ?? "").trim() ||
+        String(prevExtra.admobIosRewardedUnitId ?? ""),
     },
   } as ExpoConfig;
 };

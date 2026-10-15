@@ -2,7 +2,8 @@ import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
-import { Platform, Pressable, StyleSheet, Text, type StyleProp, type ViewStyle } from "react-native";
+import { Platform, Pressable, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
+import { Text } from "@/components/ui/text";
 
 type Props = {
   onPress: () => void;

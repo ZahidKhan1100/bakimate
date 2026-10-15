@@ -1,6 +1,8 @@
 import { BakimateColors } from "@/constants/bakimate-theme";
+// accentGold imported from theme for premium gradient tail
 import type { ReactNode } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { Text } from "@/components/ui/text";
 import { LinearGradient } from "expo-linear-gradient";
 
 type Variant = "home" | "screen";
@@ -54,7 +56,8 @@ export function ScreenHeroHeader({
         {trailing}
       </View>
       <LinearGradient
-        colors={[BakimateColors.primary, BakimateColors.accentTeal]}
+        colors={[BakimateColors.primary, BakimateColors.accentTeal, BakimateColors.accentGold]}
+        locations={[0, 0.6, 1]}
         start={{ x: 0, y: 0.5 }}
         end={{ x: 1, y: 0.5 }}
         style={styles.accent}
@@ -66,7 +69,7 @@ export function ScreenHeroHeader({
 const styles = StyleSheet.create({
   wrap: { marginTop: 4 },
   eyebrow: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "900",
     letterSpacing: 2.4,
     textTransform: "uppercase",
@@ -97,9 +100,9 @@ const styles = StyleSheet.create({
   },
   accent: {
     marginTop: 18,
-    height: 4,
+    height: 3,
     width: "100%",
     borderRadius: 2,
-    opacity: 0.92,
+    opacity: 1,
   },
 });

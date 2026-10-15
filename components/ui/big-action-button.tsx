@@ -2,7 +2,8 @@ import { BakimateColors } from "@/constants/bakimate-theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import type { ComponentProps } from "react";
-import { Platform, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { Text } from "@/components/ui/text";
 
 type Variant = "primary" | "success" | "danger" | "neutral";
 type Size = "md" | "lg" | "xl";

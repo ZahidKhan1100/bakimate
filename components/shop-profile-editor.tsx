@@ -29,11 +29,10 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
   type TextInputProps,
 } from "react-native";
+import { Text, TextInput } from "@/components/ui/text";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 

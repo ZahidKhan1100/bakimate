@@ -1,5 +1,8 @@
+import { Platform } from "react-native";
+import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
+
 /** User preference for on-device speech recognition (BCP-47). */
-export type VoiceSttLocalePreference = "auto" | "en-US" | "ms-MY" | "ur-PK" | "ps-AF";
+export type VoiceSttLocalePreference = "auto" | "en-US" | "ms-MY" | "ur-PK";
 
 export const VOICE_STT_LOCALE_OPTIONS: readonly {
   key: VoiceSttLocalePreference;
@@ -9,21 +12,60 @@ export const VOICE_STT_LOCALE_OPTIONS: readonly {
   { key: "en-US", labelKey: "voice_stt_en" },
   { key: "ms-MY", labelKey: "voice_stt_ms" },
   { key: "ur-PK", labelKey: "voice_stt_ur" },
-  { key: "ps-AF", labelKey: "voice_stt_ps" },
 ] as const;
+
+/** Legacy persisted value — Pashto removed from voice settings. */
+export function sanitizeVoiceSttLocale(raw: string | undefined): VoiceSttLocalePreference {
+  if (raw === "ps-AF" || raw === "ps") {
+    return "auto";
+  }
+  if (VOICE_STT_LOCALE_OPTIONS.some((o) => o.key === raw)) {
+    return raw as VoiceSttLocalePreference;
+  }
+  return "auto";
+}
 
 /** Resolve BCP-47 tag for expo-speech-recognition from prefs + app UI language. */
 export function resolveVoiceSttBcp47(
   preference: VoiceSttLocalePreference,
   appLanguage: string,
 ): string {
-  if (preference !== "auto") {
-    return preference;
+  const pref = sanitizeVoiceSttLocale(preference);
+  if (pref !== "auto") {
+    return pref;
   }
   if (appLanguage.startsWith("ms")) {
     return "ms-MY";
   }
   return "en-US";
+}
+
+/** Pick a locale the device speech engine actually supports (iOS often lacks ur-PK). */
+export async function resolveSpeechLocaleForDevice(
+  preference: VoiceSttLocalePreference,
+  appLanguage: string,
+): Promise<string> {
+  const desired = resolveVoiceSttBcp47(preference, appLanguage);
+  try {
+    const { locales, installedLocales } = await ExpoSpeechRecognitionModule.getSupportedLocales({});
+    const supported = new Set([...locales, ...installedLocales]);
+    if (supported.has(desired)) {
+      return desired;
+    }
+    if (desired.startsWith("ur") && supported.has("en-US")) {
+      return "en-US";
+    }
+    if (desired.startsWith("ms") && supported.has("en-US")) {
+      return "en-US";
+    }
+    if (supported.has("en-US")) {
+      return "en-US";
+    }
+    const first = locales[0] ?? installedLocales[0];
+    return first ?? desired;
+  } catch {
+    return Platform.OS === "ios" && desired === "ur-PK" ? "en-US" : desired;
+  }
 }
 
 /** Bias strings for STT (udhaar, payments, quick items). */

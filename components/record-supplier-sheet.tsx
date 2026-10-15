@@ -5,13 +5,16 @@ import { MoneyKeypad } from "@/components/money-keypad";
 import { QuickAmountChips } from "@/components/ui/quick-amount-chips";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
+import { presentRewardedAdGate } from "@/lib/ads/rewarded-ad-gate";
 import type { Supplier } from "@/lib/api-types";
 import { useRecordSupplierLedger } from "@/lib/hooks/useSuppliers";
 import { shareSupplierPaymentOutPdf, shareSupplierPurchasePdf } from "@/lib/pdf-download";
+import type { PremiumRecordingAccess } from "@/lib/premium-recording-access";
 import { profileToReceiptBlurb, resolveShopProfile } from "@/lib/shop-profile";
 import { buildSupplierPaymentOutWhatsAppMessage } from "@/lib/supplier-share-messages";
 import { openWhatsAppText } from "@/lib/whatsapp";
 import { normalizePhoneForWaMe } from "@/lib/phone-wa-me";
+import { addDaysLocal, todayYmd } from "@/lib/calendar-ymd";
 import { useSessionStore } from "@/stores/session-store";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -23,10 +26,9 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
+import { Text, TextInput } from "@/components/ui/text";
 
 type Mode = "purchase" | "payment_out";
 
@@ -38,6 +40,8 @@ type Props = {
   isDark: boolean;
   onClose: () => void;
   onSaved: () => void;
+  /** Gates the post-save "share via WhatsApp"/"share PDF" buttons behind a rewarded ad when not entitled. */
+  premiumAccess?: PremiumRecordingAccess;
 };
 
 /**
@@ -53,6 +57,7 @@ export function RecordSupplierSheet({
   isDark,
   onClose,
   onSaved,
+  premiumAccess,
 }: Props) {
   const { t } = useTranslation();
   const headline = Colors[isDark ? "dark" : "light"].text;
@@ -60,6 +65,7 @@ export function RecordSupplierSheet({
 
   const [valueSen, setValueSen] = useState(0);
   const [note, setNote] = useState("");
+  const [transactionDateYmd, setTransactionDateYmd] = useState(() => todayYmd());
   const [moreOpen, setMoreOpen] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
 
@@ -73,6 +79,7 @@ export function RecordSupplierSheet({
   const resetState = () => {
     setValueSen(0);
     setNote("");
+    setTransactionDateYmd(todayYmd());
     setMoreOpen(false);
   };
 
@@ -93,6 +100,7 @@ export function RecordSupplierSheet({
         amount_sen: valueSen,
         type: mode,
         note: note.trim() || undefined,
+        recorded_at: transactionDateYmd,
       },
       {
         onSuccess: (saved) => {
@@ -118,9 +126,9 @@ export function RecordSupplierSheet({
                       Alert.alert(t("error"), t("customer_pdf_web_unavailable"));
                       return;
                     }
-                    void shareSupplierPurchasePdf(supplier.id, tid, { whatsappPhone: supplier.phone }).catch((err) =>
-                      Alert.alert(t("error"), err instanceof Error ? err.message : String(err)),
-                    );
+                    void presentRewardedAdGate(premiumAccess)
+                      .then(() => shareSupplierPurchasePdf(supplier.id, tid, { whatsappPhone: supplier.phone }))
+                      .catch((err) => Alert.alert(t("error"), err instanceof Error ? err.message : String(err)));
                   },
                 },
               ]);
@@ -151,9 +159,9 @@ export function RecordSupplierSheet({
                     Alert.alert(t("error"), t("customer_pdf_web_unavailable"));
                     return;
                   }
-                  void shareSupplierPaymentOutPdf(supplier.id, tid, { whatsappPhone: supplier.phone }).catch((err) =>
-                    Alert.alert(t("error"), err instanceof Error ? err.message : String(err)),
-                  );
+                  void presentRewardedAdGate(premiumAccess)
+                    .then(() => shareSupplierPaymentOutPdf(supplier.id, tid, { whatsappPhone: supplier.phone }))
+                    .catch((err) => Alert.alert(t("error"), err instanceof Error ? err.message : String(err)));
                 },
               });
               buttons.unshift({
@@ -163,9 +171,11 @@ export function RecordSupplierSheet({
                     Alert.alert(t("error"), t("contact_phone_required_whatsapp"));
                     return;
                   }
-                  void openWhatsAppText(msg, supplier.phone).catch(() => {
-                    Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
-                  });
+                  void presentRewardedAdGate(premiumAccess)
+                    .then(() => openWhatsAppText(msg, supplier.phone))
+                    .catch(() => {
+                      Alert.alert(t("share_failed_title"), t("whatsapp_unavailable"));
+                    });
                 },
               });
               Alert.alert(t("payment_saved_title"), t("supplier_payment_saved_body"), buttons);
@@ -215,6 +225,38 @@ export function RecordSupplierSheet({
               isDark={isDark}
               onAdd={(major) => setValueSen((v) => v + major * 100)}
             />
+          </View>
+
+          <View style={styles.section}>
+            <Text style={[styles.sectionHint, { color: muted }]}>{t("sheet_transaction_date")}</Text>
+            <View style={styles.dueRow}>
+              {[
+                { key: "today", ymd: todayYmd(), label: t("sheet_date_today") },
+                { key: "yesterday", ymd: addDaysLocal(-1), label: t("sheet_date_yesterday") },
+              ].map(({ key, ymd, label }) => {
+                const sel = transactionDateYmd === ymd;
+                return (
+                  <Pressable
+                    key={key}
+                    onPress={() => setTransactionDateYmd(ymd)}
+                    style={({ pressed }) => [
+                      styles.dueTile,
+                      {
+                        borderColor: sel ? BakimateColors.accentTeal : BakimateColors.border,
+                        backgroundColor: sel
+                          ? "rgba(46, 196, 182, 0.18)"
+                          : isDark
+                            ? "rgba(255,255,255,0.04)"
+                            : "rgba(255,255,255,0.7)",
+                        opacity: pressed ? 0.86 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.dueTileText, { color: headline }]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           <View style={{ marginTop: 6 }}>
@@ -297,6 +339,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerCaption: { marginTop: 4, fontSize: 13, fontWeight: "700" },
+  section: { marginTop: 4, marginBottom: 4 },
+  sectionHint: { fontSize: 14, fontWeight: "800", marginBottom: 8, letterSpacing: 0.2 },
+  dueRow: { flexDirection: "row", gap: 10 },
+  dueTile: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+  },
+  dueTileText: { fontSize: 14, fontWeight: "800" },
   moreToggle: {
     marginTop: 14,
     flexDirection: "row",

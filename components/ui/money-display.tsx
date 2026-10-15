@@ -1,7 +1,8 @@
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { formatMoneyMinor } from "@/lib/money";
 import { useTranslation } from "react-i18next";
-import { StyleSheet, Text, type TextStyle } from "react-native";
+import { StyleSheet, type TextStyle } from "react-native";
+import { Text } from "@/components/ui/text";
 
 type Tone = "debt" | "paid" | "neutral";
 type Size = "huge" | "large" | "medium";

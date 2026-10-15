@@ -90,6 +90,7 @@ export function useRecordSupplierLedger() {
       amount_sen: number;
       type: "purchase" | "payment_out";
       note?: string | null;
+      recorded_at?: string | null;
     }) => {
       const { assertRecordingPremiumOrThrow } = await import("@/lib/premium-recording-access");
       await assertRecordingPremiumOrThrow();

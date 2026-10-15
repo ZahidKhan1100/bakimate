@@ -3,9 +3,9 @@
     "name": "BakiMate",
     "owner": "izahidkhan",
     "slug": "bakimate",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.jpg",
+    "icon": "./assets/images/icon.png",
     "scheme": "bakimate",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -18,7 +18,7 @@
         "NSContactsUsageDescription": "BakiMate suggests names and phone numbers from your contacts when you add a customer or supplier.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "4"
+      "buildNumber": "5"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,11 +28,11 @@
       "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false,
       "package": "com.ihabimate.bakimate",
-      "versionCode": 11
+      "versionCode": 31
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/icon.jpg"
+      "favicon": "./assets/images/icon.png"
     },
     "plugins": [
       "expo-router",
@@ -78,6 +78,8 @@
       "revenueCatAndroid": "",
       "revenueCatPremiumEntitlementId": "BakiMate Pro",
       "revenueCatOfferingId": "bakimate_pro",
+      "admobAndroidRewardedUnitId": "",
+      "admobIosRewardedUnitId": "",
       "googleIosClientId": "",
       "googleAndroidClientId": "",
       "googleWebClientId": "",

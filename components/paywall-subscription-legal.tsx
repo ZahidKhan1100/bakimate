@@ -2,7 +2,8 @@ import { getPrivacyPolicyUrl, getTermsOfUseUrl } from "@/constants/site";
 import { paywallPlanTitle } from "@/lib/paywall-plan-copy";
 import { paywallSubscriptionDurationLabel } from "@/lib/paywall-subscription-duration";
 import type { TFunction } from "i18next";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "@/components/ui/text";
 import type { PurchasesPackage } from "react-native-purchases";
 
 type Props = {

@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import Purchases from "react-native-purchases";
 
+import { MONETIZATION_ENABLED } from "@/lib/monetization";
 import { getNativeRevenueCatApiKey, warnIfRevenueCatKeyWrongPlatform } from "@/lib/revenuecat-settings";
 
 let configured = false;
@@ -11,7 +12,7 @@ let inFlight: Promise<boolean> | null = null;
  * Returns whether the SDK is ready for API calls (`getCustomerInfo`, purchases, …).
  */
 export function ensureRevenueCatConfigured(): Promise<boolean> {
-  if (Platform.OS === "web") {
+  if (!MONETIZATION_ENABLED || Platform.OS === "web") {
     return Promise.resolve(false);
   }
 

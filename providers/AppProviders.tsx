@@ -181,7 +181,8 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     void (async () => {
       if (!token || laravelUserId == null) {
         try {
-          if (await ensureRevenueCatConfigured()) {
+          /** logOut on an anonymous RevenueCat user logs an SDK error, so only call it after a logIn. */
+          if ((await ensureRevenueCatConfigured()) && !(await Purchases.isAnonymous())) {
             await Purchases.logOut();
           }
         } catch {

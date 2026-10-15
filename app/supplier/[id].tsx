@@ -1,4 +1,5 @@
 import { RecordSupplierSheet } from "@/components/record-supplier-sheet";
+import { SupplierLedgerSheet } from "@/components/supplier-ledger-sheet";
 import { BigActionButton } from "@/components/ui/big-action-button";
 import { MeshBackdrop } from "@/components/ui/mesh-backdrop";
 import { MoneyDisplay } from "@/components/ui/money-display";
@@ -6,11 +7,13 @@ import { PersonAvatar } from "@/components/ui/person-avatar";
 import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { presentRewardedAdGate } from "@/lib/ads/rewarded-ad-gate";
 import type { SupplierLedgerTransactionApi } from "@/lib/api-types";
 import { usePremiumEntitlementBootstrapBlocksUi } from "@/lib/hooks/usePremiumEntitlementBootstrapBlocksUi";
 import { usePremiumRecordingAccess } from "@/lib/hooks/usePremiumRecordingAccess";
 import { useShopCurrency } from "@/lib/hooks/useShopCurrency";
 import { useSupplier } from "@/lib/hooks/useSuppliers";
+import { formatCalendarDateShort } from "@/lib/format-dates";
 import { formatMoneyMinor } from "@/lib/money";
 import { apiErrorMessage } from "@/lib/api";
 import { shareSupplierPaymentOutPdf, shareSupplierPurchasePdf } from "@/lib/pdf-download";
@@ -28,9 +31,9 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import { Text } from "@/components/ui/text";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SupplierDetailScreen() {
@@ -60,17 +63,11 @@ export default function SupplierDetailScreen() {
   });
 
   const [sheetMode, setSheetMode] = useState<"purchase" | "payment_out" | null>(null);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
   const [pdfBusyTxId, setPdfBusyTxId] = useState<number | null>(null);
 
-  const requirePremium = () => {
-    const status = premiumRecording.data;
-    if (premiumBootstrapBlocks) return false;
-    if (status?.requiresPremium === true && !status.entitled) {
-      router.push("/paywall");
-      return false;
-    }
-    return true;
-  };
+  /** Recording purchases/payments is never subscription-gated — only WhatsApp report sharing is. */
+  const requirePremium = () => true;
 
   const openSheet = (mode: "purchase" | "payment_out") => {
     if (!requirePremium()) return;
@@ -84,10 +81,10 @@ export default function SupplierDetailScreen() {
       return;
     }
     if (!supplier) return;
-    if (!requirePremium()) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setPdfBusyTxId(tx.id);
     try {
+      await presentRewardedAdGate(premiumRecording.data);
       if (tx.type === "purchase") {
         await shareSupplierPurchasePdf(supplierId, tx.id, { whatsappPhone: supplier.phone });
       } else {
@@ -245,7 +242,22 @@ export default function SupplierDetailScreen() {
             />
           </View>
 
-          <Text style={[styles.sectionTitle, { color: headline }]}>{t("supplier_recent_tx")}</Text>
+          <View style={styles.sectionHeadRow}>
+            <Text style={[styles.sectionTitle, { color: headline, flex: 1, marginBottom: 0 }]}>
+              {t("supplier_recent_tx")}
+            </Text>
+            <Pressable
+              onPress={() => setLedgerOpen(true)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={t("supplier_ledger_open")}
+              style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Text style={{ color: BakimateColors.accentTeal, fontWeight: "800", fontSize: 14 }}>
+                {t("supplier_ledger_open")}
+              </Text>
+            </Pressable>
+          </View>
 
           {recent.length === 0 ? (
             <View style={styles.emptyWrap}>
@@ -282,7 +294,9 @@ export default function SupplierDetailScreen() {
                         </Text>
                       ) : null}
                       {tx.created_at ? (
-                        <Text style={[styles.txDate, { color: muted }]}>{tx.created_at.slice(0, 10)}</Text>
+                        <Text style={[styles.txDate, { color: muted }]}>
+                          {formatCalendarDateShort(tx.created_at, i18n.language)}
+                        </Text>
                       ) : null}
                     </View>
 
@@ -338,8 +352,18 @@ export default function SupplierDetailScreen() {
         supplier={supplier}
         currency={currency}
         isDark={isDark}
+        premiumAccess={premiumRecording.data}
         onClose={() => setSheetMode(null)}
         onSaved={() => void refetchSupplier()}
+      />
+
+      <SupplierLedgerSheet
+        visible={ledgerOpen}
+        supplierId={supplier.id}
+        supplierName={supplier.name}
+        currencyCode={currency}
+        isDark={isDark}
+        onClose={() => setLedgerOpen(false)}
       />
 
       {sheetMode ? null : (
@@ -412,6 +436,12 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", gap: 12, marginTop: 6, marginBottom: 22 },
   actionBtn: { flex: 1 },
 
+  sectionHeadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
   sectionTitle: { fontSize: 17, fontWeight: "900", marginBottom: 10 },
 
   emptyWrap: { alignItems: "center", paddingVertical: 40, gap: 10 },
@@ -433,8 +463,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   txTitle: { fontWeight: "900", fontSize: 15 },
-  txNote: { marginTop: 4, fontSize: 12, fontWeight: "600" },
-  txDate: { marginTop: 4, fontSize: 11, fontWeight: "700" },
+  txNote: { marginTop: 4, fontSize: 14, fontWeight: "600" },
+  txDate: { marginTop: 4, fontSize: 13, fontWeight: "700" },
   txAmt: { fontWeight: "900", fontSize: 15 },
   txTrailingCol: { alignItems: "flex-end", gap: 6 },
   txPdfPill: {
@@ -446,7 +476,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  txPdfPillText: { fontWeight: "900", fontSize: 12 },
+  txPdfPillText: { fontWeight: "900", fontSize: 14 },
 
   bottomFade: { position: "absolute", left: 0, right: 0, bottom: 0, height: 40 },
 });

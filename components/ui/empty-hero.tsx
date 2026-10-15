@@ -2,7 +2,8 @@ import { BakimateColors } from "@/constants/bakimate-theme";
 import { Colors } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
-import { Platform, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Platform, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { Text } from "@/components/ui/text";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 

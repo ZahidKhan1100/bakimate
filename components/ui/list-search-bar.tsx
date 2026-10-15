@@ -5,10 +5,10 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  TextInput,
   View,
   type TextInputProps,
 } from "react-native";
+import { TextInput } from "@/components/ui/text";
 
 type Props = {
   value: string;
@@ -18,6 +18,8 @@ type Props = {
   headlineColor: string;
   mutedColor: string;
   accessibilityLabel?: string;
+  /** `contacts` = flat pill on dark list (phone contacts style). */
+  variant?: "default" | "contacts";
 } & Pick<TextInputProps, "returnKeyType" | "autoCorrect" | "autoCapitalize">;
 
 /**
@@ -31,18 +33,28 @@ export function ListSearchBar({
   headlineColor,
   mutedColor,
   accessibilityLabel,
+  variant = "default",
   returnKeyType = "search",
   autoCorrect = false,
   autoCapitalize = "none",
 }: Props) {
   const [focused, setFocused] = useState(false);
+  const isContacts = variant === "contacts";
   const accent = isDark ? BakimateColors.accentTeal : BakimateColors.primary;
-  const border = focused
-    ? accent
+  const border = isContacts
+    ? "transparent"
+    : focused
+      ? accent
+      : isDark
+        ? BakimateColors.glassBorderDark
+        : "rgba(15, 23, 42, 0.1)";
+  const fill = isContacts
+    ? isDark
+      ? "rgba(38, 38, 42, 0.95)"
+      : "rgba(229, 231, 235, 0.95)"
     : isDark
-      ? BakimateColors.glassBorderDark
-      : "rgba(15, 23, 42, 0.1)";
-  const fill = isDark ? "rgba(15, 23, 42, 0.55)" : "rgba(255, 255, 255, 0.82)";
+      ? "rgba(15, 23, 42, 0.55)"
+      : "rgba(255, 255, 255, 0.82)";
 
   return (
     <View
@@ -51,23 +63,24 @@ export function ListSearchBar({
         {
           borderColor: border,
           backgroundColor: fill,
-          ...Platform.select({
-            ios: focused
-              ? {
-                  shadowColor: accent,
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: isDark ? 0.35 : 0.18,
-                  shadowRadius: 10,
-                }
-              : {
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: isDark ? 0.2 : 0.06,
-                  shadowRadius: 6,
-                },
-            android: { elevation: focused ? 4 : 1 },
-            default: {},
-          }),
+          ...(!isContacts &&
+            Platform.select({
+              ios: focused
+                ? {
+                    shadowColor: accent,
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: isDark ? 0.35 : 0.18,
+                    shadowRadius: 10,
+                  }
+                : {
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: isDark ? 0.2 : 0.06,
+                    shadowRadius: 6,
+                  },
+              android: { elevation: focused ? 4 : 1 },
+              default: {},
+            })),
         },
       ]}
     >
@@ -114,7 +127,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     paddingHorizontal: 14,
     minHeight: 48,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   leadingIcon: { marginRight: 10 },
   input: {
